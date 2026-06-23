@@ -89,12 +89,12 @@ export async function runSetup(ctx: ExtensionCommandContext): Promise<string> {
 
 	const modelChoices = await getModelChoices(ctx);
 
-	const micro = await ctx.ui.input("Micro executor agents", config.agents.micro.join(", "));
-	const microModel = await selectModel(ctx, "Micro profile model preference", config.models.micro, modelChoices);
-	const small = await ctx.ui.input("Small executor agents", config.agents.small.join(", "));
-	const smallModel = await selectModel(ctx, "Small profile model preference", config.models.small, modelChoices);
-	const medium = await ctx.ui.input("Medium worker agent", config.agents.medium);
-	const mediumModel = await selectModel(ctx, "Medium profile model preference", config.models.medium, modelChoices);
+	const instant = await ctx.ui.input("Instant executor agents", config.agents.instant.join(", "));
+	const instantModel = await selectModel(ctx, "Instant profile model preference", config.models.instant, modelChoices);
+	const rapid = await ctx.ui.input("Rapid executor agents", config.agents.rapid.join(", "));
+	const rapidModel = await selectModel(ctx, "Rapid profile model preference", config.models.rapid, modelChoices);
+	const verified = await ctx.ui.input("Verified worker agent", config.agents.verified);
+	const verifiedModel = await selectModel(ctx, "Verified profile model preference", config.models.verified, modelChoices);
 	const reviewer = await ctx.ui.input("Reviewer agent", config.agents.reviewer);
 	const strictChoice = await ctx.ui.select("Strict mode default", ["on", "off"]);
 
@@ -102,17 +102,17 @@ export async function runSetup(ctx: ExtensionCommandContext): Promise<string> {
 		...config,
 		strictMode: strictChoice !== "off",
 		agents: {
-			micro: splitAgents(micro || config.agents.micro.join(", ")),
-			small: splitAgents(small || config.agents.small.join(", ")),
-			medium: medium?.trim() || config.agents.medium,
+			instant: splitAgents(instant || config.agents.instant.join(", ")),
+			rapid: splitAgents(rapid || config.agents.rapid.join(", ")),
+			verified: verified?.trim() || config.agents.verified,
 			reviewer: reviewer?.trim() || config.agents.reviewer,
-			fullAuto: config.agents.fullAuto,
+			deep: config.agents.deep,
 		},
 		models: {
-			micro: microModel,
-			small: smallModel,
-			medium: mediumModel,
-			fullAuto: "",
+			instant: instantModel,
+			rapid: rapidModel,
+			verified: verifiedModel,
+			deep: "",
 		},
 	};
 

@@ -1,4 +1,6 @@
-export type ConductorTier = "micro" | "small" | "medium" | "full-auto";
+export type ConductorTier = "instant" | "rapid" | "verified" | "deep";
+export type LegacyConductorTier = "micro" | "small" | "medium" | "full-auto";
+export type ConductorTierInput = ConductorTier | LegacyConductorTier;
 
 export type ExecutionTopology = "linear" | "orchestrated";
 export type ExecutionGuard = "none" | "optional" | "recommended" | "required";
@@ -21,36 +23,36 @@ export type ConductorConfig = {
 	strictMode: boolean;
 	defaultDryRun: boolean;
 	agents: {
-		micro: string[];
-		small: string[];
-		medium: string;
+		instant: string[];
+		rapid: string[];
+		verified: string;
 		reviewer: string;
-		fullAuto: string;
+		deep: string;
 	};
 	models: {
-		micro: string;
-		small: string;
-		medium: string;
-		fullAuto: string;
+		instant: string;
+		rapid: string;
+		verified: string;
+		deep: string;
 	};
 	profiles: Record<ConductorTier, ExecutionProfile>;
 	routing: {
-		micro: {
+		instant: {
 			maxFiles: number;
 			maxEstimatedLines: number;
 			disallowDomains: RiskDomain[];
 		};
-		small: {
+		rapid: {
 			maxFiles: number;
 			maxEstimatedLines: number;
 			disallowDomains: RiskDomain[];
 		};
-		medium: {
+		verified: {
 			maxFiles: number;
 			maxEstimatedLines: number;
 			requirePlan: boolean;
 		};
-		fullAuto: {
+		deep: {
 			requireExplicitApproval: boolean;
 			maxReviewRounds: number;
 		};

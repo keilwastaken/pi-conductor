@@ -57,16 +57,16 @@ export function routeTask(task: string, config: ConductorConfig, forcedTier?: Co
 	if (signals.isAmbiguous) risks.push("Task is ambiguous and may need parent clarification.");
 
 	const chooseAgent = (tier: ConductorTier) => {
-		if (tier === "micro") return config.agents.micro[0];
-		if (tier === "small") return config.agents.small[0];
-		if (tier === "medium") return config.agents.medium;
-		return config.agents.fullAuto;
+		if (tier === "instant") return config.agents.instant[0];
+		if (tier === "rapid") return config.agents.rapid[0];
+		if (tier === "verified") return config.agents.verified;
+		return config.agents.deep;
 	};
 	const chooseModel = (tier: ConductorTier) => {
-		if (tier === "micro") return config.models.micro || undefined;
-		if (tier === "small") return config.models.small || undefined;
-		if (tier === "medium") return config.models.medium || undefined;
-		return config.models.fullAuto || undefined;
+		if (tier === "instant") return config.models.instant || undefined;
+		if (tier === "rapid") return config.models.rapid || undefined;
+		if (tier === "verified") return config.models.verified || undefined;
+		return config.models.deep || undefined;
 	};
 
 	if (forcedTier) {
@@ -83,20 +83,20 @@ export function routeTask(task: string, config: ConductorConfig, forcedTier?: Co
 		};
 	}
 
-	const disallowedMicroDomain = signals.riskDomains.find((domain) => config.routing.micro.disallowDomains.includes(domain));
-	const fitsMicro =
+	const disallowedInstantDomain = signals.riskDomains.find((domain) => config.routing.instant.disallowDomains.includes(domain));
+	const fitsInstant =
 		!signals.isAmbiguous &&
-		!disallowedMicroDomain &&
-		signals.estimatedFiles <= config.routing.micro.maxFiles &&
-		signals.estimatedLines <= config.routing.micro.maxEstimatedLines;
+		!disallowedInstantDomain &&
+		signals.estimatedFiles <= config.routing.instant.maxFiles &&
+		signals.estimatedLines <= config.routing.instant.maxEstimatedLines;
 
-	if (fitsMicro) {
-		reasons.push("Task is very small, unambiguous, and fits the micro profile thresholds.");
+	if (fitsInstant) {
+		reasons.push("Task is exact, unambiguous, and fits the instant profile thresholds.");
 		return {
-			route: "micro",
-			tier: "micro",
-			suggestedAgent: chooseAgent("micro"),
-			suggestedModel: chooseModel("micro"),
+			route: "instant",
+			tier: "instant",
+			suggestedAgent: chooseAgent("instant"),
+			suggestedModel: chooseModel("instant"),
 			requiresApproval: true,
 			reasons,
 			risks,
@@ -104,20 +104,20 @@ export function routeTask(task: string, config: ConductorConfig, forcedTier?: Co
 		};
 	}
 
-	const disallowedSmallDomain = signals.riskDomains.find((domain) => config.routing.small.disallowDomains.includes(domain));
-	const fitsSmall =
+	const disallowedRapidDomain = signals.riskDomains.find((domain) => config.routing.rapid.disallowDomains.includes(domain));
+	const fitsRapid =
 		!signals.isAmbiguous &&
-		!disallowedSmallDomain &&
-		signals.estimatedFiles <= config.routing.small.maxFiles &&
-		signals.estimatedLines <= config.routing.small.maxEstimatedLines;
+		!disallowedRapidDomain &&
+		signals.estimatedFiles <= config.routing.rapid.maxFiles &&
+		signals.estimatedLines <= config.routing.rapid.maxEstimatedLines;
 
-	if (fitsSmall) {
-		reasons.push("Task is narrow, low-risk, and fits the small profile thresholds.");
+	if (fitsRapid) {
+		reasons.push("Task is narrow, low-risk, and fits the rapid profile thresholds.");
 		return {
-			route: "small",
-			tier: "small",
-			suggestedAgent: chooseAgent("small"),
-			suggestedModel: chooseModel("small"),
+			route: "rapid",
+			tier: "rapid",
+			suggestedAgent: chooseAgent("rapid"),
+			suggestedModel: chooseModel("rapid"),
 			requiresApproval: true,
 			reasons,
 			risks,
@@ -125,21 +125,21 @@ export function routeTask(task: string, config: ConductorConfig, forcedTier?: Co
 		};
 	}
 
-	const fitsMedium =
+	const fitsVerified =
 		!signals.isAmbiguous &&
-		signals.estimatedFiles <= config.routing.medium.maxFiles &&
-		signals.estimatedLines <= config.routing.medium.maxEstimatedLines &&
+		signals.estimatedFiles <= config.routing.verified.maxFiles &&
+		signals.estimatedLines <= config.routing.verified.maxEstimatedLines &&
 		!signals.riskDomains.includes("security") &&
 		!signals.riskDomains.includes("deployment");
 
-	if (fitsMedium) {
+	if (fitsVerified) {
 		reasons.push("Task is bounded but too large or risky for a linear profile.");
-		if (config.routing.medium.requirePlan) reasons.push("Medium profile recommends a parent-owned plan before launch.");
+		if (config.routing.verified.requirePlan) reasons.push("Verified profile recommends a parent-owned plan before launch.");
 		return {
-			route: "medium",
-			tier: "medium",
-			suggestedAgent: chooseAgent("medium"),
-			suggestedModel: chooseModel("medium"),
+			route: "verified",
+			tier: "verified",
+			suggestedAgent: chooseAgent("verified"),
+			suggestedModel: chooseModel("verified"),
 			requiresApproval: true,
 			reasons,
 			risks,
@@ -154,10 +154,10 @@ export function routeTask(task: string, config: ConductorConfig, forcedTier?: Co
 
 	reasons.push("Task is broad, high-risk, or likely needs an orchestrated execution profile.");
 	return {
-		route: "full-auto",
-		tier: "full-auto",
-		suggestedAgent: chooseAgent("full-auto"),
-		suggestedModel: chooseModel("full-auto"),
+		route: "deep",
+		tier: "deep",
+		suggestedAgent: chooseAgent("deep"),
+		suggestedModel: chooseModel("deep"),
 		requiresApproval: true,
 		reasons,
 		risks,

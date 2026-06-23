@@ -6,14 +6,25 @@ import { writeRunLog } from "./logs.js";
 import { formatDecision, routeTask } from "./routing.js";
 import { shouldBlockToolCall } from "./safety.js";
 import { runSetup } from "./setup.js";
-import type { ConductorTier } from "./types.js";
+import type { ConductorTier, ConductorTierInput } from "./types.js";
 
-const tiers = ["micro", "small", "medium", "full-auto"] as const;
-const isTier = (value: string): value is ConductorTier => (tiers as readonly string[]).includes(value);
+const tiers = ["instant", "rapid", "verified", "deep"] as const;
+const tierAliases: Record<string, ConductorTier> = {
+	instant: "instant",
+	micro: "instant",
+	rapid: "rapid",
+	small: "rapid",
+	verified: "verified",
+	medium: "verified",
+	deep: "deep",
+	"full-auto": "deep",
+};
+const normalizeTier = (value: string): ConductorTier | undefined => tierAliases[value];
 
 const parseTierAndTask = (args: string): { tier?: ConductorTier; task: string } => {
 	const [first, ...rest] = args.trim().split(/\s+/);
-	if (first && isTier(first)) return { tier: first, task: rest.join(" ").trim() };
+	const tier = first ? normalizeTier(first) : undefined;
+	if (tier) return { tier, task: rest.join(" ").trim() };
 	return { task: args.trim() };
 };
 
@@ -22,7 +33,7 @@ const help = [
 	"- /conductor setup",
 	"- /conductor status",
 	"- /conductor route <task>",
-	"- /conductor handoff [micro|small|medium|full-auto] <task>",
+	"- /conductor handoff [instant|rapid|verified|deep] <task>",
 	"- /conductor strict on|off (writes global config)",
 ].join("\n");
 
@@ -67,15 +78,16 @@ export default function conductorExtension(pi: ExtensionAPI) {
 					`Default dry-run: ${config.defaultDryRun ? "on" : "off"}`,
 					"Execution profiles:",
 					...tiers.map(profileLine),
-					`Micro agents: ${config.agents.micro.join(", ")}`,
-					`Small agents: ${config.agents.small.join(", ")}`,
-					`Medium agent: ${config.agents.medium}`,
+					`Instant agents: ${config.agents.instant.join(", ")}`,
+					`Rapid agents: ${config.agents.rapid.join(", ")}`,
+					`Verified agent: ${config.agents.verified}`,
 					`Reviewer agent: ${config.agents.reviewer}`,
-					`Full-auto worker agent: ${config.agents.fullAuto}`,
-					`Micro model preference: ${config.models.micro || "inherit agent default"}`,
-					`Small model preference: ${config.models.small || "inherit agent default"}`,
-					`Medium model preference: ${config.models.medium || "inherit agent default"}`,
-					`Full-auto model preference: ${config.models.fullAuto || "current parent chat model"}`,
+					`Deep worker agent: ${config.agents.deep}`,
+					`Instant model preference: ${config.models.instant || "inherit agent default"}`,
+					`Rapid model preference: ${config.models.rapid || "inherit agent default"}`,
+					`Verified model preference: ${config.models.verified || "inherit agent default"}`,
+					`Deep model preference: ${config.models.deep || "current parent chat model"}`,
+					"Legacy aliases: micro→instant, small→rapid, medium→verified, full-auto→deep",
 					`Config paths: ${paths.length > 0 ? paths.join(", ") : "defaults only"}`,
 				].join("\n");
 				ctx.ui.notify(text, "info");
@@ -95,7 +107,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
 			if (subcommand === "handoff" || subcommand === "brief") {
 				const { tier, task } = parseTierAndTask(body);
 				if (!task) {
-					ctx.ui.notify("Usage: /conductor handoff [micro|small|medium|full-auto] <task>", "warning");
+					ctx.ui.notify("Usage: /conductor handoff [instant|rapid|verified|deep] <task>", "warning");
 					return;
 				}
 				const decision = routeTask(task, config, tier);
@@ -141,11 +153,23 @@ export default function conductorExtension(pi: ExtensionAPI) {
 		],
 		parameters: Type.Object({
 			task: Type.String({ description: "Coding task to classify and prepare for delegation" }),
-			tier: Type.Optional(Type.Union([Type.Literal("micro"), Type.Literal("small"), Type.Literal("medium"), Type.Literal("full-auto")])),
+			tier: Type.Optional(
+				Type.Union([
+					Type.Literal("instant"),
+					Type.Literal("rapid"),
+					Type.Literal("verified"),
+					Type.Literal("deep"),
+					Type.Literal("micro"),
+					Type.Literal("small"),
+					Type.Literal("medium"),
+					Type.Literal("full-auto"),
+				]),
+			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const { config } = await loadConfig(ctx.cwd, ctx.isProjectTrusted());
-			const decision = routeTask(params.task, config, params.tier as ConductorTier | undefined);
+			const tier = params.tier ? normalizeTier(params.tier as ConductorTierInput) : undefined;
+			const decision = routeTask(params.task, config, tier);
 			const handoff = buildDelegationHandoff(params.task, decision, config);
 			const output = [formatDecision(decision), "", "Handoff:", formatHandoff(handoff)].join("\n");
 			const logPath = await writeRunLog(ctx.cwd, "handoff", output);

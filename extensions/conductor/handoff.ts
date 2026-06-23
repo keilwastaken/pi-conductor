@@ -8,9 +8,15 @@ const validationHints = (): string[] => [
 
 const executionProfile = (tier: NonNullable<RouteDecision["tier"]>, config: ConductorConfig): string[] => {
 	const profile = config.profiles[tier];
-	const shape = profile.topology === "linear" ? "linear bypass/direct worker profile" : "orchestrated profile";
+	const descriptions: Record<NonNullable<RouteDecision["tier"]>, string> = {
+		instant: "linear direct worker; exact files; no scout; compact return",
+		rapid: "linear direct worker; bounded edits; optional scout if targets are unclear",
+		verified: "orchestrated bounded flow; scout/context recommended; verification required",
+		deep: "orchestrated deep flow; scout, plan, execute, verify, and review recommended",
+	};
+	const shape = profile.topology === "linear" ? "linear direct-worker profile" : "orchestrated profile";
 	return [
-		`${tier}: ${shape}.`,
+		`${tier}: ${shape}; ${descriptions[tier]}.`,
 		`Topology: ${profile.topology}; scout: ${profile.scout}; verification: ${profile.verification}; review: ${profile.review ? "yes" : "no"}; max worker visits: ${profile.maxWorkerVisits}.`,
 		profile.topology === "linear"
 			? "Proceed directly unless the task scope is unclear; keep reads/edits tightly task-scoped."
@@ -19,7 +25,7 @@ const executionProfile = (tier: NonNullable<RouteDecision["tier"]>, config: Cond
 };
 
 export function buildDelegationHandoff(task: string, decision: RouteDecision, config: ConductorConfig): DelegationHandoff {
-	const tier = decision.tier ?? "small";
+	const tier = decision.tier ?? "rapid";
 	const allowedFiles = decision.signals.mentionedFiles.length > 0 ? decision.signals.mentionedFiles : ["<parent must confirm allowed files before launch>"];
 
 	const prompt = [

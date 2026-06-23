@@ -2,47 +2,47 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
-import type { ConductorConfig } from "./types.js";
+import type { ConductorConfig, ConductorTier } from "./types.js";
 
 export const DEFAULT_CONFIG: ConductorConfig = {
 	strictMode: true,
 	defaultDryRun: true,
 	agents: {
-		micro: ["delegate"],
-		small: ["delegate"],
-		medium: "worker",
+		instant: ["delegate"],
+		rapid: ["delegate"],
+		verified: "worker",
 		reviewer: "reviewer",
-		fullAuto: "worker",
+		deep: "worker",
 	},
 	models: {
-		micro: "",
-		small: "",
-		medium: "",
-		fullAuto: "",
+		instant: "",
+		rapid: "",
+		verified: "",
+		deep: "",
 	},
 	profiles: {
-		micro: { topology: "linear", scout: "none", verification: "optional", review: false, maxWorkerVisits: 1 },
-		small: { topology: "linear", scout: "optional", verification: "recommended", review: false, maxWorkerVisits: 1 },
-		medium: { topology: "orchestrated", scout: "recommended", verification: "required", review: false, maxWorkerVisits: 2 },
-		"full-auto": { topology: "orchestrated", scout: "required", verification: "required", review: true, maxWorkerVisits: 3 },
+		instant: { topology: "linear", scout: "none", verification: "optional", review: false, maxWorkerVisits: 1 },
+		rapid: { topology: "linear", scout: "optional", verification: "recommended", review: false, maxWorkerVisits: 1 },
+		verified: { topology: "orchestrated", scout: "recommended", verification: "required", review: false, maxWorkerVisits: 2 },
+		deep: { topology: "orchestrated", scout: "required", verification: "required", review: true, maxWorkerVisits: 3 },
 	},
 	routing: {
-		micro: {
+		instant: {
 			maxFiles: 1,
 			maxEstimatedLines: 30,
 			disallowDomains: ["auth", "security", "persistence", "deployment", "architecture"],
 		},
-		small: {
+		rapid: {
 			maxFiles: 3,
 			maxEstimatedLines: 150,
 			disallowDomains: ["auth", "security", "persistence", "deployment", "architecture"],
 		},
-		medium: {
+		verified: {
 			maxFiles: 8,
 			maxEstimatedLines: 500,
 			requirePlan: true,
 		},
-		fullAuto: {
+		deep: {
 			requireExplicitApproval: true,
 			maxReviewRounds: 3,
 		},
@@ -58,6 +58,28 @@ export const globalConfigPath = () => join(homedir(), CONFIG_DIR_NAME, "conducto
 export const projectConfigPath = (cwd: string) => join(cwd, CONFIG_DIR_NAME, "conductor", "config.json");
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
+
+const legacyKeys: Record<ConductorTier, string[]> = {
+	instant: ["micro"],
+	rapid: ["small"],
+	verified: ["medium"],
+	deep: ["deep", "fullAuto", "full-auto"],
+};
+
+const recordFor = (source: Record<string, unknown>, key: ConductorTier): Record<string, unknown> => {
+	for (const candidate of [key, ...legacyKeys[key]]) {
+		const value = source[candidate];
+		if (isRecord(value)) return value;
+	}
+	return {};
+};
+
+const valueFor = (source: Record<string, unknown>, key: ConductorTier): unknown => {
+	for (const candidate of [key, ...legacyKeys[key]]) {
+		if (candidate in source) return source[candidate];
+	}
+	return undefined;
+};
 
 const stringArray = (value: unknown, fallback: string[]): string[] => {
 	if (!Array.isArray(value)) return fallback;
@@ -76,37 +98,37 @@ export function mergeConfig(raw: unknown, base: ConductorConfig = DEFAULT_CONFIG
 	const agents = isRecord(raw.agents) ? raw.agents : {};
 	const models = isRecord(raw.models) ? raw.models : {};
 	const routing = isRecord(raw.routing) ? raw.routing : {};
-	const micro = isRecord(routing.micro) ? routing.micro : {};
-	const small = isRecord(routing.small) ? routing.small : {};
-	const medium = isRecord(routing.medium) ? routing.medium : {};
-	const fullAuto = isRecord(routing.fullAuto) ? routing.fullAuto : {};
+	const instant = recordFor(routing, "instant");
+	const rapid = recordFor(routing, "rapid");
+	const verified = recordFor(routing, "verified");
+	const deep = recordFor(routing, "deep");
 	const safety = isRecord(raw.safety) ? raw.safety : {};
 	const profiles = isRecord(raw.profiles) ? raw.profiles : {};
-	const microProfile = isRecord(profiles.micro) ? profiles.micro : {};
-	const smallProfile = isRecord(profiles.small) ? profiles.small : {};
-	const mediumProfile = isRecord(profiles.medium) ? profiles.medium : {};
-	const fullAutoProfile = isRecord(profiles["full-auto"]) ? profiles["full-auto"] : {};
-	const mergedSmallAgents = stringArray(agents.small, base.agents.small);
-	const mergedSmallModel = str(models.small, base.models.small);
+	const instantProfile = recordFor(profiles, "instant");
+	const rapidProfile = recordFor(profiles, "rapid");
+	const verifiedProfile = recordFor(profiles, "verified");
+	const deepProfile = recordFor(profiles, "deep");
+	const mergedRapidAgents = stringArray(valueFor(agents, "rapid"), base.agents.rapid);
+	const mergedRapidModel = str(valueFor(models, "rapid"), base.models.rapid);
 	const mergedRouting = {
-		micro: {
-			maxFiles: num(micro.maxFiles, base.routing.micro.maxFiles),
-			maxEstimatedLines: num(micro.maxEstimatedLines, base.routing.micro.maxEstimatedLines),
-			disallowDomains: stringArray(micro.disallowDomains, base.routing.micro.disallowDomains) as ConductorConfig["routing"]["micro"]["disallowDomains"],
+		instant: {
+			maxFiles: num(instant.maxFiles, base.routing.instant.maxFiles),
+			maxEstimatedLines: num(instant.maxEstimatedLines, base.routing.instant.maxEstimatedLines),
+			disallowDomains: stringArray(instant.disallowDomains, base.routing.instant.disallowDomains) as ConductorConfig["routing"]["instant"]["disallowDomains"],
 		},
-		small: {
-			maxFiles: num(small.maxFiles, base.routing.small.maxFiles),
-			maxEstimatedLines: num(small.maxEstimatedLines, base.routing.small.maxEstimatedLines),
-			disallowDomains: stringArray(small.disallowDomains, base.routing.small.disallowDomains) as ConductorConfig["routing"]["small"]["disallowDomains"],
+		rapid: {
+			maxFiles: num(rapid.maxFiles, base.routing.rapid.maxFiles),
+			maxEstimatedLines: num(rapid.maxEstimatedLines, base.routing.rapid.maxEstimatedLines),
+			disallowDomains: stringArray(rapid.disallowDomains, base.routing.rapid.disallowDomains) as ConductorConfig["routing"]["rapid"]["disallowDomains"],
 		},
-		medium: {
-			maxFiles: num(medium.maxFiles, base.routing.medium.maxFiles),
-			maxEstimatedLines: num(medium.maxEstimatedLines, base.routing.medium.maxEstimatedLines),
-			requirePlan: bool(medium.requirePlan, base.routing.medium.requirePlan),
+		verified: {
+			maxFiles: num(verified.maxFiles, base.routing.verified.maxFiles),
+			maxEstimatedLines: num(verified.maxEstimatedLines, base.routing.verified.maxEstimatedLines),
+			requirePlan: bool(verified.requirePlan, base.routing.verified.requirePlan),
 		},
-		fullAuto: {
-			requireExplicitApproval: bool(fullAuto.requireExplicitApproval, base.routing.fullAuto.requireExplicitApproval),
-			maxReviewRounds: num(fullAuto.maxReviewRounds, base.routing.fullAuto.maxReviewRounds),
+		deep: {
+			requireExplicitApproval: bool(deep.requireExplicitApproval, base.routing.deep.requireExplicitApproval),
+			maxReviewRounds: num(deep.maxReviewRounds, base.routing.deep.maxReviewRounds),
 		},
 	};
 
@@ -114,47 +136,47 @@ export function mergeConfig(raw: unknown, base: ConductorConfig = DEFAULT_CONFIG
 		strictMode: bool(raw.strictMode, base.strictMode),
 		defaultDryRun: bool(raw.defaultDryRun, base.defaultDryRun),
 		agents: {
-			micro: stringArray(agents.micro, mergedSmallAgents),
-			small: mergedSmallAgents,
-			medium: str(agents.medium, base.agents.medium),
+			instant: stringArray(valueFor(agents, "instant"), mergedRapidAgents),
+			rapid: mergedRapidAgents,
+			verified: str(valueFor(agents, "verified"), base.agents.verified),
 			reviewer: str(agents.reviewer, base.agents.reviewer),
-			fullAuto: str(agents.fullAuto, base.agents.fullAuto),
+			deep: str(valueFor(agents, "deep"), base.agents.deep),
 		},
 		models: {
-			micro: str(models.micro, mergedSmallModel),
-			small: mergedSmallModel,
-			medium: str(models.medium, base.models.medium),
-			fullAuto: str(models.fullAuto, base.models.fullAuto),
+			instant: str(valueFor(models, "instant"), mergedRapidModel),
+			rapid: mergedRapidModel,
+			verified: str(valueFor(models, "verified"), base.models.verified),
+			deep: str(valueFor(models, "deep"), base.models.deep),
 		},
 		routing: mergedRouting,
 		profiles: {
-			micro: {
-				topology: oneOf(microProfile.topology, ["linear", "orchestrated"], base.profiles.micro.topology),
-				scout: oneOf(microProfile.scout, ["none", "optional", "recommended", "required"], base.profiles.micro.scout),
-				verification: oneOf(microProfile.verification, ["optional", "recommended", "required"], base.profiles.micro.verification),
-				review: bool(microProfile.review, base.profiles.micro.review),
-				maxWorkerVisits: num(microProfile.maxWorkerVisits, base.profiles.micro.maxWorkerVisits),
+			instant: {
+				topology: oneOf(instantProfile.topology, ["linear", "orchestrated"], base.profiles.instant.topology),
+				scout: oneOf(instantProfile.scout, ["none", "optional", "recommended", "required"], base.profiles.instant.scout),
+				verification: oneOf(instantProfile.verification, ["optional", "recommended", "required"], base.profiles.instant.verification),
+				review: bool(instantProfile.review, base.profiles.instant.review),
+				maxWorkerVisits: num(instantProfile.maxWorkerVisits, base.profiles.instant.maxWorkerVisits),
 			},
-			small: {
-				topology: oneOf(smallProfile.topology, ["linear", "orchestrated"], base.profiles.small.topology),
-				scout: oneOf(smallProfile.scout, ["none", "optional", "recommended", "required"], base.profiles.small.scout),
-				verification: oneOf(smallProfile.verification, ["optional", "recommended", "required"], base.profiles.small.verification),
-				review: bool(smallProfile.review, base.profiles.small.review),
-				maxWorkerVisits: num(smallProfile.maxWorkerVisits, base.profiles.small.maxWorkerVisits),
+			rapid: {
+				topology: oneOf(rapidProfile.topology, ["linear", "orchestrated"], base.profiles.rapid.topology),
+				scout: oneOf(rapidProfile.scout, ["none", "optional", "recommended", "required"], base.profiles.rapid.scout),
+				verification: oneOf(rapidProfile.verification, ["optional", "recommended", "required"], base.profiles.rapid.verification),
+				review: bool(rapidProfile.review, base.profiles.rapid.review),
+				maxWorkerVisits: num(rapidProfile.maxWorkerVisits, base.profiles.rapid.maxWorkerVisits),
 			},
-			medium: {
-				topology: oneOf(mediumProfile.topology, ["linear", "orchestrated"], base.profiles.medium.topology),
-				scout: oneOf(mediumProfile.scout, ["none", "optional", "recommended", "required"], base.profiles.medium.scout),
-				verification: oneOf(mediumProfile.verification, ["optional", "recommended", "required"], base.profiles.medium.verification),
-				review: bool(mediumProfile.review, base.profiles.medium.review),
-				maxWorkerVisits: num(mediumProfile.maxWorkerVisits, base.profiles.medium.maxWorkerVisits),
+			verified: {
+				topology: oneOf(verifiedProfile.topology, ["linear", "orchestrated"], base.profiles.verified.topology),
+				scout: oneOf(verifiedProfile.scout, ["none", "optional", "recommended", "required"], base.profiles.verified.scout),
+				verification: oneOf(verifiedProfile.verification, ["optional", "recommended", "required"], base.profiles.verified.verification),
+				review: bool(verifiedProfile.review, base.profiles.verified.review),
+				maxWorkerVisits: num(verifiedProfile.maxWorkerVisits, base.profiles.verified.maxWorkerVisits),
 			},
-			"full-auto": {
-				topology: oneOf(fullAutoProfile.topology, ["linear", "orchestrated"], base.profiles["full-auto"].topology),
-				scout: oneOf(fullAutoProfile.scout, ["none", "optional", "recommended", "required"], base.profiles["full-auto"].scout),
-				verification: oneOf(fullAutoProfile.verification, ["optional", "recommended", "required"], base.profiles["full-auto"].verification),
-				review: bool(fullAutoProfile.review, base.profiles["full-auto"].review),
-				maxWorkerVisits: num(fullAutoProfile.maxWorkerVisits, mergedRouting.fullAuto.maxReviewRounds || 3),
+			deep: {
+				topology: oneOf(deepProfile.topology, ["linear", "orchestrated"], base.profiles.deep.topology),
+				scout: oneOf(deepProfile.scout, ["none", "optional", "recommended", "required"], base.profiles.deep.scout),
+				verification: oneOf(deepProfile.verification, ["optional", "recommended", "required"], base.profiles.deep.verification),
+				review: bool(deepProfile.review, base.profiles.deep.review),
+				maxWorkerVisits: num(deepProfile.maxWorkerVisits, mergedRouting.deep.maxReviewRounds || base.profiles.deep.maxWorkerVisits),
 			},
 		},
 		safety: {

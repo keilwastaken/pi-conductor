@@ -11,8 +11,17 @@ test("package exposes pi resources", async () => {
   assert.deepEqual(pkg.pi.prompts, ["./prompts"]);
 });
 
-test("user-facing command uses handoff terminology", async () => {
+test("user-facing command uses handoff terminology and canonical flow names", async () => {
   const index = await readFile(new URL("extensions/conductor/index.ts", root), "utf8");
-  assert.match(index, /\/conductor handoff/);
+  assert.match(index, /\/conductor handoff \[instant\|rapid\|verified\|deep\]/);
+  assert.match(index, /micro: "instant"/);
+  assert.match(index, /"full-auto": "deep"/);
   assert.doesNotMatch(index, /\/conductor packet/);
+});
+
+test("behavior-aligned prompt files are exposed", async () => {
+  for (const file of ["instant-linear.md", "rapid-linear.md", "verified-orchestrated.md", "deep-orchestrated.md"]) {
+    const content = await readFile(new URL(`prompts/${file}`, root), "utf8");
+    assert.match(content, /Execution Profile/);
+  }
 });

@@ -24,7 +24,7 @@ pi install /Users/keilaloia/kogstudio/pi-conductor
 /conductor setup
 /conductor status
 /conductor route <task>
-/conductor handoff [micro|small|medium|full-auto] <task>
+/conductor handoff [instant|rapid|verified|deep] <task>
 /conductor strict on|off
 ```
 
@@ -47,28 +47,30 @@ A handoff is a clean work order for a delegated subagent. It includes:
 
 The public names are execution profiles/topology constraints, not model-size labels:
 
-- `micro`: linear direct-worker profile; no scout pass; verification optional; no review; max worker visits 1
-- `small`: linear direct-worker profile; scout optional; verification recommended; no review; max worker visits 1
-- `medium`: orchestrated profile; scout recommended; verification required; no review; max worker visits 2
-- `full-auto`: orchestrated profile; scout required; verification required; review enabled; max worker visits 3
+- `instant`: linear direct-worker profile; exact files; no scout; compact return; max worker visits 1
+- `rapid`: linear direct-worker profile; bounded edits; optional scout if targets are unclear; max worker visits 1
+- `verified`: orchestrated bounded flow; scout/context recommended; verification required; max worker visits 2
+- `deep`: orchestrated deep flow; scout + plan + execute + verify + review; max worker visits 3
+
+Legacy aliases are accepted for compatibility: `micro` → `instant`, `small` → `rapid`, `medium` → `verified`, `full-auto` → `deep`.
 
 Default agent names are generic and configurable:
 
-- Micro agents: `delegate`
-- Small agents: `delegate`
-- Medium agent: `worker`
+- Instant agents: `delegate`
+- Rapid agents: `delegate`
+- Verified agent: `worker`
 - Reviewer agent: `reviewer`
-- Full-auto worker agent: `worker`
+- Deep worker agent: `worker`
 
-Model and agent selection is a configurable implementation detail. By default, model preferences are blank so each agent inherits its normal default, while full-auto uses the current parent chat model to recommend the flow. Run `/conductor setup` to customize agents and model preferences from Pi's active model registry, or enter model IDs manually if no registry choices are available.
+Model and agent selection is a configurable implementation detail. By default, model preferences are blank so each agent inherits its normal default, while deep uses the current parent chat model to recommend the flow. Run `/conductor setup` to customize agents and model preferences from Pi's active model registry, or enter model IDs manually if no registry choices are available.
 
 ## Execution profile policy
 
-- Micro: linear bypass/direct worker profile; read/edit exact allowed files only; run requested or narrow validation; return compactly.
-- Small: linear bypass/direct worker profile; optional scout only if target files are unclear.
-- Medium: orchestrated profile; scout/context pass recommended before execution; verification required.
-- Full-auto: orchestrated profile; scout + plan + execute + review recommended.
+- Instant: linear direct-worker profile; read/edit exact allowed files only; no scout; run requested or narrow validation; return compactly.
+- Rapid: linear direct-worker profile; bounded edits; optional scout only if target files are unclear.
+- Verified: orchestrated bounded flow; scout/context pass recommended before execution; verification required.
+- Deep: orchestrated deep flow; scout + plan + execute + verify + review recommended.
 
 ## Phase 2 direction
 
-The next phase will add guarded launch support for small delegations after explicit approval. Until then, use the generated handoff with your existing subagent workflow.
+The next phase will add guarded launch support for rapid delegations after explicit approval. Until then, use the generated handoff with your existing subagent workflow.
