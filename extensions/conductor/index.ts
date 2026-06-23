@@ -39,7 +39,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("conductor", {
-		description: "Route coding work to right-sized delegated agents",
+		description: "Recommend execution profiles for coding work",
 		handler: async (args, ctx) => {
 			const trimmed = args.trim();
 			const [subcommand = "help", ...rest] = trimmed.split(/\s+/);
@@ -58,18 +58,24 @@ export default function conductorExtension(pi: ExtensionAPI) {
 			}
 
 			if (subcommand === "status" || subcommand === "config") {
+				const profileLine = (tier: ConductorTier) => {
+					const profile = config.profiles[tier];
+					return `${tier}: ${profile.topology}, scout ${profile.scout}, verify ${profile.verification}, review ${profile.review ? "yes" : "no"}, visits ${profile.maxWorkerVisits}`;
+				};
 				const text = [
 					`Strict mode: ${config.strictMode ? "on" : "off"}`,
 					`Default dry-run: ${config.defaultDryRun ? "on" : "off"}`,
+					"Execution profiles:",
+					...tiers.map(profileLine),
 					`Micro agents: ${config.agents.micro.join(", ")}`,
 					`Small agents: ${config.agents.small.join(", ")}`,
 					`Medium agent: ${config.agents.medium}`,
 					`Reviewer agent: ${config.agents.reviewer}`,
-					`Full-auto flow: parent-orchestrated ${config.agents.fullAuto}`,
-					`Micro model: ${config.models.micro || "inherit agent default"}`,
-					`Small model: ${config.models.small || "inherit agent default"}`,
-					`Medium model: ${config.models.medium || "inherit agent default"}`,
-					`Full-auto model: current parent chat model orchestrates the flow`,
+					`Full-auto worker agent: ${config.agents.fullAuto}`,
+					`Micro model preference: ${config.models.micro || "inherit agent default"}`,
+					`Small model preference: ${config.models.small || "inherit agent default"}`,
+					`Medium model preference: ${config.models.medium || "inherit agent default"}`,
+					`Full-auto model preference: ${config.models.fullAuto || "current parent chat model"}`,
 					`Config paths: ${paths.length > 0 ? paths.join(", ") : "defaults only"}`,
 				].join("\n");
 				ctx.ui.notify(text, "info");
@@ -93,7 +99,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
 					return;
 				}
 				const decision = routeTask(task, config, tier);
-				const handoff = buildDelegationHandoff(task, decision);
+				const handoff = buildDelegationHandoff(task, decision, config);
 				const output = [formatDecision(decision), "", "Handoff:", formatHandoff(handoff)].join("\n");
 				const logPath = await writeRunLog(ctx.cwd, "handoff", output);
 				ctx.ui.notify(`${output}\n\nSaved: ${logPath}`, "info");
@@ -140,7 +146,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const { config } = await loadConfig(ctx.cwd, ctx.isProjectTrusted());
 			const decision = routeTask(params.task, config, params.tier as ConductorTier | undefined);
-			const handoff = buildDelegationHandoff(params.task, decision);
+			const handoff = buildDelegationHandoff(params.task, decision, config);
 			const output = [formatDecision(decision), "", "Handoff:", formatHandoff(handoff)].join("\n");
 			const logPath = await writeRunLog(ctx.cwd, "handoff", output);
 			return {

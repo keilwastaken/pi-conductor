@@ -66,11 +66,11 @@ export function routeTask(task: string, config: ConductorConfig, forcedTier?: Co
 		if (tier === "micro") return config.models.micro || undefined;
 		if (tier === "small") return config.models.small || undefined;
 		if (tier === "medium") return config.models.medium || undefined;
-		return undefined;
+		return config.models.fullAuto || undefined;
 	};
 
 	if (forcedTier) {
-		reasons.push(`Tier forced by user: ${forcedTier}.`);
+		reasons.push(`Execution profile forced by user: ${forcedTier}.`);
 		return {
 			route: forcedTier,
 			tier: forcedTier,
@@ -91,7 +91,7 @@ export function routeTask(task: string, config: ConductorConfig, forcedTier?: Co
 		signals.estimatedLines <= config.routing.micro.maxEstimatedLines;
 
 	if (fitsMicro) {
-		reasons.push("Task is very small, unambiguous, and fits the micro-executor thresholds.");
+		reasons.push("Task is very small, unambiguous, and fits the micro profile thresholds.");
 		return {
 			route: "micro",
 			tier: "micro",
@@ -112,7 +112,7 @@ export function routeTask(task: string, config: ConductorConfig, forcedTier?: Co
 		signals.estimatedLines <= config.routing.small.maxEstimatedLines;
 
 	if (fitsSmall) {
-		reasons.push("Task is narrow, low-risk, and fits the small-executor thresholds.");
+		reasons.push("Task is narrow, low-risk, and fits the small profile thresholds.");
 		return {
 			route: "small",
 			tier: "small",
@@ -133,8 +133,8 @@ export function routeTask(task: string, config: ConductorConfig, forcedTier?: Co
 		!signals.riskDomains.includes("deployment");
 
 	if (fitsMedium) {
-		reasons.push("Task is bounded but too large or risky for a small executor.");
-		if (config.routing.medium.requirePlan) reasons.push("Medium route requires a parent-owned plan before launch.");
+		reasons.push("Task is bounded but too large or risky for a linear profile.");
+		if (config.routing.medium.requirePlan) reasons.push("Medium profile recommends a parent-owned plan before launch.");
 		return {
 			route: "medium",
 			tier: "medium",
@@ -152,7 +152,7 @@ export function routeTask(task: string, config: ConductorConfig, forcedTier?: Co
 		return { route: "need-decision", requiresApproval: false, reasons, risks, signals };
 	}
 
-	reasons.push("Task is broad, high-risk, or likely needs plan/implement/review orchestration.");
+	reasons.push("Task is broad, high-risk, or likely needs an orchestrated execution profile.");
 	return {
 		route: "full-auto",
 		tier: "full-auto",
@@ -167,7 +167,7 @@ export function routeTask(task: string, config: ConductorConfig, forcedTier?: Co
 
 export function formatDecision(decision: RouteDecision): string {
 	const lines = [
-		`Route: ${decision.route}`,
+		`Route/profile: ${decision.route}`,
 		decision.suggestedAgent ? `Suggested agent: ${decision.suggestedAgent}` : undefined,
 		decision.suggestedModel ? `Preferred model: ${decision.suggestedModel}` : undefined,
 		`Requires approval: ${decision.requiresApproval ? "yes" : "no"}`,

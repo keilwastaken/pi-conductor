@@ -1,4 +1,4 @@
-import type { DelegationHandoff, RouteDecision } from "./types.js";
+import type { ConductorConfig, DelegationHandoff, RouteDecision } from "./types.js";
 
 const validationHints = (): string[] => [
 	"Inspect this repo's package.json, Makefile, or documentation for available script targets.",
@@ -6,22 +6,19 @@ const validationHints = (): string[] => [
 	"Report back if no suitable validation or testing setup exists.",
 ];
 
-const executionPolicy = (tier: NonNullable<RouteDecision["tier"]>): string[] => {
-	if (tier === "micro") {
-		return [
-			"Micro: no scout/context pass; read/edit exact allowed files only; run only requested or narrow validation; return compactly.",
-		];
-	}
-	if (tier === "small") {
-		return ["Small: optional scout only if target files are unclear; otherwise proceed directly with minimal task-scoped edits."];
-	}
-	if (tier === "medium") {
-		return ["Medium: scout/context pass recommended before execution; then fix and validate once."];
-	}
-	return ["Full-auto: parent-orchestrated scout + plan + execute + review flow."];
+const executionProfile = (tier: NonNullable<RouteDecision["tier"]>, config: ConductorConfig): string[] => {
+	const profile = config.profiles[tier];
+	const shape = profile.topology === "linear" ? "linear bypass/direct worker profile" : "orchestrated profile";
+	return [
+		`${tier}: ${shape}.`,
+		`Topology: ${profile.topology}; scout: ${profile.scout}; verification: ${profile.verification}; review: ${profile.review ? "yes" : "no"}; max worker visits: ${profile.maxWorkerVisits}.`,
+		profile.topology === "linear"
+			? "Proceed directly unless the task scope is unclear; keep reads/edits tightly task-scoped."
+			: "Use parent-owned orchestration recommendations for scout/plan/execute/review handoffs; do not launch workers from this handoff.",
+	];
 };
 
-export function buildDelegationHandoff(task: string, decision: RouteDecision): DelegationHandoff {
+export function buildDelegationHandoff(task: string, decision: RouteDecision, config: ConductorConfig): DelegationHandoff {
 	const tier = decision.tier ?? "small";
 	const allowedFiles = decision.signals.mentionedFiles.length > 0 ? decision.signals.mentionedFiles : ["<parent must confirm allowed files before launch>"];
 
@@ -40,8 +37,8 @@ export function buildDelegationHandoff(task: string, decision: RouteDecision): D
 		"- Keep the diff minimal and task-scoped.",
 		"- Prefer existing project patterns over new abstractions.",
 		"",
-		"Execution policy / Context policy:",
-		...executionPolicy(tier).map((policy) => `- ${policy}`),
+		"Execution profile:",
+		...executionProfile(tier, config).map((policy) => `- ${policy}`),
 		"",
 		"Non-goals:",
 		"- Do not redesign architecture beyond this task.",

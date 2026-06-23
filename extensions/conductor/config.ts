@@ -8,17 +8,23 @@ export const DEFAULT_CONFIG: ConductorConfig = {
 	strictMode: true,
 	defaultDryRun: true,
 	agents: {
-		micro: ["qwen-executor", "qwen35b-executor", "gpt54-mini-executor"],
-		small: ["qwen-executor", "qwen35b-executor", "gpt54-mini-executor"],
+		micro: ["delegate"],
+		small: ["delegate"],
 		medium: "worker",
 		reviewer: "reviewer",
-		fullAuto: "review-loop",
+		fullAuto: "worker",
 	},
 	models: {
 		micro: "",
 		small: "",
 		medium: "",
 		fullAuto: "",
+	},
+	profiles: {
+		micro: { topology: "linear", scout: "none", verification: "optional", review: false, maxWorkerVisits: 1 },
+		small: { topology: "linear", scout: "optional", verification: "recommended", review: false, maxWorkerVisits: 1 },
+		medium: { topology: "orchestrated", scout: "recommended", verification: "required", review: false, maxWorkerVisits: 2 },
+		"full-auto": { topology: "orchestrated", scout: "required", verification: "required", review: true, maxWorkerVisits: 3 },
 	},
 	routing: {
 		micro: {
@@ -62,6 +68,8 @@ const stringArray = (value: unknown, fallback: string[]): string[] => {
 const bool = (value: unknown, fallback: boolean): boolean => (typeof value === "boolean" ? value : fallback);
 const num = (value: unknown, fallback: number): number => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
 const str = (value: unknown, fallback: string): string => (typeof value === "string" && value.trim() ? value : fallback);
+const oneOf = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
+	typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
 
 export function mergeConfig(raw: unknown, base: ConductorConfig = DEFAULT_CONFIG): ConductorConfig {
 	if (!isRecord(raw)) return structuredClone(base);
@@ -73,8 +81,34 @@ export function mergeConfig(raw: unknown, base: ConductorConfig = DEFAULT_CONFIG
 	const medium = isRecord(routing.medium) ? routing.medium : {};
 	const fullAuto = isRecord(routing.fullAuto) ? routing.fullAuto : {};
 	const safety = isRecord(raw.safety) ? raw.safety : {};
+	const profiles = isRecord(raw.profiles) ? raw.profiles : {};
+	const microProfile = isRecord(profiles.micro) ? profiles.micro : {};
+	const smallProfile = isRecord(profiles.small) ? profiles.small : {};
+	const mediumProfile = isRecord(profiles.medium) ? profiles.medium : {};
+	const fullAutoProfile = isRecord(profiles["full-auto"]) ? profiles["full-auto"] : {};
 	const mergedSmallAgents = stringArray(agents.small, base.agents.small);
 	const mergedSmallModel = str(models.small, base.models.small);
+	const mergedRouting = {
+		micro: {
+			maxFiles: num(micro.maxFiles, base.routing.micro.maxFiles),
+			maxEstimatedLines: num(micro.maxEstimatedLines, base.routing.micro.maxEstimatedLines),
+			disallowDomains: stringArray(micro.disallowDomains, base.routing.micro.disallowDomains) as ConductorConfig["routing"]["micro"]["disallowDomains"],
+		},
+		small: {
+			maxFiles: num(small.maxFiles, base.routing.small.maxFiles),
+			maxEstimatedLines: num(small.maxEstimatedLines, base.routing.small.maxEstimatedLines),
+			disallowDomains: stringArray(small.disallowDomains, base.routing.small.disallowDomains) as ConductorConfig["routing"]["small"]["disallowDomains"],
+		},
+		medium: {
+			maxFiles: num(medium.maxFiles, base.routing.medium.maxFiles),
+			maxEstimatedLines: num(medium.maxEstimatedLines, base.routing.medium.maxEstimatedLines),
+			requirePlan: bool(medium.requirePlan, base.routing.medium.requirePlan),
+		},
+		fullAuto: {
+			requireExplicitApproval: bool(fullAuto.requireExplicitApproval, base.routing.fullAuto.requireExplicitApproval),
+			maxReviewRounds: num(fullAuto.maxReviewRounds, base.routing.fullAuto.maxReviewRounds),
+		},
+	};
 
 	return {
 		strictMode: bool(raw.strictMode, base.strictMode),
@@ -92,25 +126,35 @@ export function mergeConfig(raw: unknown, base: ConductorConfig = DEFAULT_CONFIG
 			medium: str(models.medium, base.models.medium),
 			fullAuto: str(models.fullAuto, base.models.fullAuto),
 		},
-		routing: {
+		routing: mergedRouting,
+		profiles: {
 			micro: {
-				maxFiles: num(micro.maxFiles, base.routing.micro.maxFiles),
-				maxEstimatedLines: num(micro.maxEstimatedLines, base.routing.micro.maxEstimatedLines),
-				disallowDomains: stringArray(micro.disallowDomains, base.routing.micro.disallowDomains) as ConductorConfig["routing"]["micro"]["disallowDomains"],
+				topology: oneOf(microProfile.topology, ["linear", "orchestrated"], base.profiles.micro.topology),
+				scout: oneOf(microProfile.scout, ["none", "optional", "recommended", "required"], base.profiles.micro.scout),
+				verification: oneOf(microProfile.verification, ["optional", "recommended", "required"], base.profiles.micro.verification),
+				review: bool(microProfile.review, base.profiles.micro.review),
+				maxWorkerVisits: num(microProfile.maxWorkerVisits, base.profiles.micro.maxWorkerVisits),
 			},
 			small: {
-				maxFiles: num(small.maxFiles, base.routing.small.maxFiles),
-				maxEstimatedLines: num(small.maxEstimatedLines, base.routing.small.maxEstimatedLines),
-				disallowDomains: stringArray(small.disallowDomains, base.routing.small.disallowDomains) as ConductorConfig["routing"]["small"]["disallowDomains"],
+				topology: oneOf(smallProfile.topology, ["linear", "orchestrated"], base.profiles.small.topology),
+				scout: oneOf(smallProfile.scout, ["none", "optional", "recommended", "required"], base.profiles.small.scout),
+				verification: oneOf(smallProfile.verification, ["optional", "recommended", "required"], base.profiles.small.verification),
+				review: bool(smallProfile.review, base.profiles.small.review),
+				maxWorkerVisits: num(smallProfile.maxWorkerVisits, base.profiles.small.maxWorkerVisits),
 			},
 			medium: {
-				maxFiles: num(medium.maxFiles, base.routing.medium.maxFiles),
-				maxEstimatedLines: num(medium.maxEstimatedLines, base.routing.medium.maxEstimatedLines),
-				requirePlan: bool(medium.requirePlan, base.routing.medium.requirePlan),
+				topology: oneOf(mediumProfile.topology, ["linear", "orchestrated"], base.profiles.medium.topology),
+				scout: oneOf(mediumProfile.scout, ["none", "optional", "recommended", "required"], base.profiles.medium.scout),
+				verification: oneOf(mediumProfile.verification, ["optional", "recommended", "required"], base.profiles.medium.verification),
+				review: bool(mediumProfile.review, base.profiles.medium.review),
+				maxWorkerVisits: num(mediumProfile.maxWorkerVisits, base.profiles.medium.maxWorkerVisits),
 			},
-			fullAuto: {
-				requireExplicitApproval: bool(fullAuto.requireExplicitApproval, base.routing.fullAuto.requireExplicitApproval),
-				maxReviewRounds: num(fullAuto.maxReviewRounds, base.routing.fullAuto.maxReviewRounds),
+			"full-auto": {
+				topology: oneOf(fullAutoProfile.topology, ["linear", "orchestrated"], base.profiles["full-auto"].topology),
+				scout: oneOf(fullAutoProfile.scout, ["none", "optional", "recommended", "required"], base.profiles["full-auto"].scout),
+				verification: oneOf(fullAutoProfile.verification, ["optional", "recommended", "required"], base.profiles["full-auto"].verification),
+				review: bool(fullAutoProfile.review, base.profiles["full-auto"].review),
+				maxWorkerVisits: num(fullAutoProfile.maxWorkerVisits, mergedRouting.fullAuto.maxReviewRounds || 3),
 			},
 		},
 		safety: {

@@ -90,11 +90,11 @@ export async function runSetup(ctx: ExtensionCommandContext): Promise<string> {
 	const modelChoices = await getModelChoices(ctx);
 
 	const micro = await ctx.ui.input("Micro executor agents", config.agents.micro.join(", "));
-	const microModel = await selectModel(ctx, "Micro tier model", config.models.micro, modelChoices);
+	const microModel = await selectModel(ctx, "Micro profile model preference", config.models.micro, modelChoices);
 	const small = await ctx.ui.input("Small executor agents", config.agents.small.join(", "));
-	const smallModel = await selectModel(ctx, "Small tier model", config.models.small, modelChoices);
+	const smallModel = await selectModel(ctx, "Small profile model preference", config.models.small, modelChoices);
 	const medium = await ctx.ui.input("Medium worker agent", config.agents.medium);
-	const mediumModel = await selectModel(ctx, "Medium tier model", config.models.medium, modelChoices);
+	const mediumModel = await selectModel(ctx, "Medium profile model preference", config.models.medium, modelChoices);
 	const reviewer = await ctx.ui.input("Reviewer agent", config.agents.reviewer);
 	const strictChoice = await ctx.ui.select("Strict mode default", ["on", "off"]);
 
@@ -106,7 +106,7 @@ export async function runSetup(ctx: ExtensionCommandContext): Promise<string> {
 			small: splitAgents(small || config.agents.small.join(", ")),
 			medium: medium?.trim() || config.agents.medium,
 			reviewer: reviewer?.trim() || config.agents.reviewer,
-			fullAuto: "review-loop",
+			fullAuto: config.agents.fullAuto,
 		},
 		models: {
 			micro: microModel,

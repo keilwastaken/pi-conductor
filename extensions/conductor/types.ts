@@ -1,5 +1,16 @@
 export type ConductorTier = "micro" | "small" | "medium" | "full-auto";
 
+export type ExecutionTopology = "linear" | "orchestrated";
+export type ExecutionGuard = "none" | "optional" | "recommended" | "required";
+
+export type ExecutionProfile = {
+	topology: ExecutionTopology;
+	scout: ExecutionGuard;
+	verification: Exclude<ExecutionGuard, "none">;
+	review: boolean;
+	maxWorkerVisits: number;
+};
+
 export type ConductorRoute = ConductorTier | "cockpit-only" | "need-decision";
 
 export type ConductorMode = "route" | "handoff" | "delegate";
@@ -22,6 +33,7 @@ export type ConductorConfig = {
 		medium: string;
 		fullAuto: string;
 	};
+	profiles: Record<ConductorTier, ExecutionProfile>;
 	routing: {
 		micro: {
 			maxFiles: number;
