@@ -91,11 +91,10 @@ export async function runSetup(ctx: ExtensionCommandContext): Promise<string> {
 
 	const instant = await ctx.ui.input("Instant executor agents", config.agents.instant.join(", "));
 	const instantModel = await selectModel(ctx, "Instant profile model preference", config.models.instant, modelChoices);
-	const rapid = await ctx.ui.input("Rapid executor agents", config.agents.rapid.join(", "));
-	const rapidModel = await selectModel(ctx, "Rapid profile model preference", config.models.rapid, modelChoices);
-	const verified = await ctx.ui.input("Verified worker agent", config.agents.verified);
-	const verifiedModel = await selectModel(ctx, "Verified profile model preference", config.models.verified, modelChoices);
-	const reviewer = await ctx.ui.input("Reviewer agent", config.agents.reviewer);
+	const fast = await ctx.ui.input("Fast executor agents", config.agents.fast.join(", "));
+	const fastModel = await selectModel(ctx, "Fast profile model preference", config.models.fast, modelChoices);
+	const careful = await ctx.ui.input("Careful worker agent", config.agents.careful);
+	const carefulModel = await selectModel(ctx, "Careful profile model preference", config.models.careful, modelChoices);
 	const strictChoice = await ctx.ui.select("Strict mode default", ["on", "off"]);
 
 	config = {
@@ -103,14 +102,13 @@ export async function runSetup(ctx: ExtensionCommandContext): Promise<string> {
 		strictMode: strictChoice !== "off",
 		agents: {
 			instant: splitAgents(instant || config.agents.instant.join(", ")),
-			rapid: splitAgents(rapid || config.agents.rapid.join(", ")),
-			verified: verified?.trim() || config.agents.verified,
-			reviewer: reviewer?.trim() || config.agents.reviewer,
+			fast: splitAgents(fast || config.agents.fast.join(", ")),
+			careful: careful?.trim() || config.agents.careful,
 		},
 		models: {
 			instant: instantModel,
-			rapid: rapidModel,
-			verified: verifiedModel,
+			fast: fastModel,
+			careful: carefulModel,
 		},
 	};
 

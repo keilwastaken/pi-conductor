@@ -1,6 +1,10 @@
 # Pi Conductor
 
-Conductor is a Pi package that keeps the main chat as the cockpit and recommends execution profiles for coding work.
+Conductor is a Pi package for delegating coding work without derailing the main chat.
+
+Most coding-agent workflows make one chat do everything: planning, implementation, debugging, review, terminal logs, and follow-up decisions. Over time, the context gets bloated, the agent drifts, and delegation means opening a new window and reconstructing the task by hand.
+
+Conductor keeps the main Pi chat as the engineering cockpit. When work emerges, it helps classify the effort, package a focused handoff, define constraints and evidence expectations, and send the task to the right worker flow so the main conversation can continue.
 
 ## Status
 
@@ -32,7 +36,7 @@ After installing on a new computer, run `/conductor setup` once to create that m
 /conductor setup
 /conductor status
 /conductor route <task>
-/conductor handoff [instant|rapid|verified] <task>
+/conductor handoff [instant|fast|careful] <task>
 /conductor strict on|off
 ```
 
@@ -53,27 +57,44 @@ A handoff is a clean work order for a delegated subagent. It includes:
 
 ## Defaults
 
-The public names are execution profiles/topology constraints, not model-size labels:
+Conductor chooses process, not intelligence. Models are implementation details. The public names are execution profiles/topology constraints, not model-size labels. They are designed around how much disruption, ambiguity, and proof the task requires:
 
 - `instant`: linear direct-worker profile; exact files; no scout; compact return; max worker visits 1
-- `rapid`: linear direct-worker profile; bounded edits; optional scout if targets are unclear; max worker visits 1
-- `verified`: full orchestrated flow; scout + plan + execute + verify + review; max worker visits 3
+- `fast`: linear direct-worker profile; bounded edits; optional scout if targets are unclear; max worker visits 1
+- `careful`: full orchestrated flow; scout + plan + execute + verify + review; max worker visits 3
 
 Default agent names are generic and configurable:
 
 - Instant agents: `delegate`
-- Rapid agents: `delegate`
-- Verified agent: `worker`
-- Reviewer agent: `reviewer`
+- Fast agents: `delegate`
+- Careful agent: `worker`
 
 Model and agent selection is a configurable implementation detail. By default, model preferences are blank so each agent inherits its normal default. Run `/conductor setup` to customize agents and model preferences from Pi's active model registry, or enter model IDs manually if no registry choices are available.
+
+## Routing rules
+
+- `instant`: exact file or obvious mechanical edit, unambiguous instructions, low blast radius.
+- `fast`: small feature/fix, bounded unknowns, low-risk domain, usually no more than a few files.
+- `careful`: many files, unclear design, user-visible behavior, risky refactor, or work needing strong evidence/review.
 
 ## Execution profile policy
 
 - Instant: linear direct-worker profile; read/edit exact allowed files only; no scout; run requested or narrow validation; return compactly.
-- Rapid: linear direct-worker profile; bounded edits; optional scout only if target files are unclear.
-- Verified: full orchestrated flow; scout + plan + execute + verify + review recommended.
+- Fast: linear direct-worker profile; bounded edits; optional scout only if target files are unclear.
+- Careful: full orchestrated flow; scout + plan + execute + verify + review recommended.
+
+## Positioning
+
+Conductor is not trying to replace the engineer or become another all-in-one coding agent. It is aimed at keeping the engineer in control while making delegation low-friction:
+
+```text
+Think here.
+Delegate there.
+Review evidence back here.
+```
+
+Claude Code, OpenCode, Amp, and similar tools are excellent worker environments. Conductor's niche is the layer above that: deciding what kind of work this is, creating the handoff, preserving the main chat's focus, and requiring useful evidence before results come back into the cockpit.
 
 ## Phase 2 direction
 
-The next phase will add guarded launch support for rapid delegations after explicit approval. Until then, use the generated handoff with your existing subagent workflow.
+The next phase will add guarded launch support for fast delegations after explicit approval. Until then, use the generated handoff with your existing subagent workflow.

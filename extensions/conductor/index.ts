@@ -6,130 +6,165 @@ import { writeRunLog } from "./logs.js";
 import { formatDecision, routeTask } from "./routing.js";
 import { shouldBlockToolCall } from "./safety.js";
 import { runSetup } from "./setup.js";
-import type { ConductorTier } from "./types.js";
+import type { ConductorConfig, ConductorTier, RouteDecision } from "./types.js";
 
-const tiers = ["instant", "rapid", "verified"] as const;
-const parseTier = (value: string): ConductorTier | undefined => (tiers.includes(value as ConductorTier) ? (value as ConductorTier) : undefined);
+const Tiers: readonly ConductorTier[] = ["instant", "fast", "careful"] as const;
 
-const parseTierAndTask = (args: string): { tier?: ConductorTier; task: string } => {
+/** Parse a tier string, returning undefined if not valid */
+function parseTier(value: string): ConductorTier | undefined {
+	return Tiers.includes(value as ConductorTier) ? (value as ConductorTier) : undefined;
+}
+
+/** Parse "[tier] <task>" input format */
+function parseTierAndTask(args: string): { tier?: ConductorTier; task: string } {
 	const [first, ...rest] = args.trim().split(/\s+/);
 	const tier = first ? parseTier(first) : undefined;
 	if (tier) return { tier, task: rest.join(" ").trim() };
 	return { task: args.trim() };
-};
+}
 
-const help = [
+/** Format status output for config overview */
+function formatStatus(config: ConductorConfig, paths: string[]): string {
+	const profileLine = (tier: ConductorTier) => {
+		const profile = config.profiles[tier];
+		return `${tier}: ${profile.topology}, scout ${profile.scout}, verify ${profile.verification}, review ${profile.review ? "yes" : "no"}, visits ${profile.maxWorkerVisits}`;
+	};
+
+	return [
+		`Strict mode: ${config.strictMode ? "on" : "off"}`,
+		"Execution profiles:",
+		...Tiers.map(profileLine),
+		`Instant agents: ${config.agents.instant.join(", ")}`,
+		`Fast agents: ${config.agents.fast.join(", ")}`,
+		`Careful agent: ${config.agents.careful}`,
+		`Instant model preference: ${config.models.instant || "inherit agent default"}`,
+		`Fast model preference: ${config.models.fast || "inherit agent default"}`,
+		`Careful model preference: ${config.models.careful || "inherit agent default"}`,
+		`Config paths: ${paths.length > 0 ? paths.join(", ") : "defaults only"}`,
+	].join("\n");
+}
+
+
+/** Build handoff output string from a RouteDecision, with optional log path when cwd provided */
+function buildHandoffOutputString(decision: RouteDecision, task: string, config: ConductorConfig): string {
+	const handoff = buildDelegationHandoff(task, decision, config);
+	return [formatDecision(decision), "", "Handoff:", formatHandoff(handoff)].join("\n");
+}
+
+/** Build handoff output with decision, and optional log path when cwd provided */
+async function buildHandoffOutput(
+	task: string,
+	config: ConductorConfig,
+	tier?: ConductorTier,
+	cwd?: string
+): Promise<{ output: string; logPath: string; decision: RouteDecision }> {
+	const decision = routeTask(task, config, tier);
+	const handoffOutput = buildHandoffOutputString(decision, task, config);
+
+	let logPath = "";
+	if (cwd) {
+		logPath = await writeRunLog(cwd, "handoff", handoffOutput);
+	}
+
+	return { output: handoffOutput, logPath, decision };
+}
+
+const helpText = [
 	"Conductor commands:",
 	"- /conductor setup",
 	"- /conductor status",
 	"- /conductor route <task>",
-	"- /conductor handoff [instant|rapid|verified] <task>",
+	"- /conductor handoff [instant|fast|careful] <task>",
 	"- /conductor strict on|off (writes global config)",
 ].join("\n");
 
 export default function conductorExtension(pi: ExtensionAPI) {
+	// Session start: set status bar indicator
 	pi.on("session_start", async (_event, ctx) => {
 		const { config } = await loadConfig(ctx.cwd, ctx.isProjectTrusted());
 		ctx.ui.setStatus("conductor", `conductor: strict ${config.strictMode ? "on" : "off"}`);
 	});
 
+	// Tool call safety gate
 	pi.on("tool_call", async (event, ctx) => {
 		const { config } = await loadConfig(ctx.cwd, ctx.isProjectTrusted());
 		const reason = shouldBlockToolCall(event, config);
 		if (reason) return { block: true, reason };
 	});
 
+	// Command registration with dispatch pattern
 	pi.registerCommand("conductor", {
 		description: "Recommend execution profiles for coding work",
 		handler: async (args, ctx) => {
 			const trimmed = args.trim();
-			const [subcommand = "help", ...rest] = trimmed.split(/\s+/);
+			if (!trimmed) {
+				ctx.ui.notify(helpText, "info");
+				return;
+			}
+			const [subcommand, ...rest] = trimmed.split(/\s+/);
 			const body = rest.join(" ").trim();
 			const { config, paths } = await loadConfig(ctx.cwd, ctx.isProjectTrusted());
 
-			if (subcommand === "help" || !trimmed) {
-				ctx.ui.notify(help, "info");
-				return;
-			}
+			// Dispatch to subcommand handlers
+			switch (subcommand) {
+				case "help":
+					ctx.ui.notify(helpText, "info");
+					return;
 
-			if (subcommand === "setup" || subcommand === "login") {
-				const message = await runSetup(ctx);
-				ctx.ui.notify(message, "info");
-				return;
-			}
-
-			if (subcommand === "status" || subcommand === "config") {
-				const profileLine = (tier: ConductorTier) => {
-					const profile = config.profiles[tier];
-					return `${tier}: ${profile.topology}, scout ${profile.scout}, verify ${profile.verification}, review ${profile.review ? "yes" : "no"}, visits ${profile.maxWorkerVisits}`;
-				};
-				const text = [
-					`Strict mode: ${config.strictMode ? "on" : "off"}`,
-					`Default dry-run: ${config.defaultDryRun ? "on" : "off"}`,
-					"Execution profiles:",
-					...tiers.map(profileLine),
-					`Instant agents: ${config.agents.instant.join(", ")}`,
-					`Rapid agents: ${config.agents.rapid.join(", ")}`,
-					`Verified agent: ${config.agents.verified}`,
-					`Reviewer agent: ${config.agents.reviewer}`,
-					`Instant model preference: ${config.models.instant || "inherit agent default"}`,
-					`Rapid model preference: ${config.models.rapid || "inherit agent default"}`,
-					`Verified model preference: ${config.models.verified || "inherit agent default"}`,
-					`Config paths: ${paths.length > 0 ? paths.join(", ") : "defaults only"}`,
-				].join("\n");
-				ctx.ui.notify(text, "info");
-				return;
-			}
-
-			if (subcommand === "route") {
-				if (!body) {
-					ctx.ui.notify("Usage: /conductor route <task>", "warning");
+				case "setup": {
+					const message = await runSetup(ctx);
+					ctx.ui.notify(message, "info");
 					return;
 				}
-				const decision = routeTask(body, config);
-				ctx.ui.notify(formatDecision(decision), "info");
-				return;
-			}
 
-			if (subcommand === "handoff" || subcommand === "brief") {
-				const { tier, task } = parseTierAndTask(body);
-				if (!task) {
-					ctx.ui.notify("Usage: /conductor handoff [instant|rapid|verified] <task>", "warning");
+				case "status":
+				case "config": {
+					const text = formatStatus(config, paths);
+					ctx.ui.notify(text, "info");
 					return;
 				}
-				const decision = routeTask(task, config, tier);
-				const handoff = buildDelegationHandoff(task, decision, config);
-				const output = [formatDecision(decision), "", "Handoff:", formatHandoff(handoff)].join("\n");
-				const logPath = await writeRunLog(ctx.cwd, "handoff", output);
-				ctx.ui.notify(`${output}\n\nSaved: ${logPath}`, "info");
-				return;
-			}
 
-			if (subcommand === "delegate") {
-				ctx.ui.notify(
-					"Delegation launch is intentionally not implemented in Phase 1. Use /conductor handoff to generate a safe subagent handoff first.",
-					"warning",
-				);
-				return;
-			}
-
-			if (subcommand === "strict") {
-				const desired = body.toLowerCase();
-				if (desired !== "on" && desired !== "off") {
-					ctx.ui.notify("Usage: /conductor strict on|off", "warning");
+				case "route": {
+					if (!body) {
+						ctx.ui.notify("Usage: /conductor route <task>", "warning");
+						return;
+					}
+					const decision = routeTask(body, config);
+					ctx.ui.notify(formatDecision(decision), "info");
 					return;
 				}
-				const { saveGlobalConfig } = await import("./config.js");
-				const path = await saveGlobalConfig({ ...config, strictMode: desired === "on" });
-				ctx.ui.setStatus("conductor", `conductor: strict ${desired}`);
-				ctx.ui.notify(`Conductor strict mode ${desired}; saved ${path}`, "info");
-				return;
-			}
 
-			ctx.ui.notify(help, "warning");
+				case "handoff": {
+					const { tier, task } = parseTierAndTask(body);
+					if (!task) {
+						ctx.ui.notify("Usage: /conductor handoff [instant|fast|careful] <task>", "warning");
+						return;
+					}
+					const { output, logPath } = await buildHandoffOutput(task, config, tier, ctx.cwd);
+					ctx.ui.notify(`${output}\n\nSaved: ${logPath}`, "info");
+					return;
+				}
+
+				case "strict": {
+					const desired = body.toLowerCase();
+					if (desired !== "on" && desired !== "off") {
+						ctx.ui.notify("Usage: /conductor strict on|off", "warning");
+						return;
+					}
+					const { saveGlobalConfig } = await import("./config.js");
+					const path = await saveGlobalConfig({ ...config, strictMode: desired === "on" });
+					ctx.ui.setStatus("conductor", `conductor: strict ${desired}`);
+					ctx.ui.notify(`Conductor strict mode ${desired}; saved ${path}`, "info");
+					return;
+				}
+
+				default:
+					ctx.ui.notify(helpText, "warning");
+			}
 		},
 	});
 
+	// Tool registration for programmatic handoff creation
 	pi.registerTool({
 		name: "conductor_handoff",
 		label: "Conductor Handoff",
@@ -140,15 +175,13 @@ export default function conductorExtension(pi: ExtensionAPI) {
 		],
 		parameters: Type.Object({
 			task: Type.String({ description: "Coding task to classify and prepare for delegation" }),
-			tier: Type.Optional(Type.Union([Type.Literal("instant"), Type.Literal("rapid"), Type.Literal("verified")])),
+			tier: Type.Optional(Type.Union([Type.Literal("instant"), Type.Literal("fast"), Type.Literal("careful")])),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const { config } = await loadConfig(ctx.cwd, ctx.isProjectTrusted());
 			const tier = params.tier as ConductorTier | undefined;
-			const decision = routeTask(params.task, config, tier);
-			const handoff = buildDelegationHandoff(params.task, decision, config);
-			const output = [formatDecision(decision), "", "Handoff:", formatHandoff(handoff)].join("\n");
-			const logPath = await writeRunLog(ctx.cwd, "handoff", output);
+			const { output, logPath, decision } = await buildHandoffOutput(params.task, config, tier, ctx.cwd);
+
 			return {
 				content: [{ type: "text", text: `${output}\n\nSaved: ${logPath}` }],
 				details: { decision, logPath },

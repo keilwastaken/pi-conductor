@@ -1,7 +1,9 @@
-import type { ConductorConfig, ConductorTier, RiskDomain, RouteDecision, TaskSignal } from "./types.js";
+import type { ConductorConfig, ConductorRoute, ConductorTier, RiskDomain, RouteDecision, TaskSignal } from "./types.js";
 
+/** File extension pattern to extract mentioned files */
 const FILE_PATTERN = /(?:^|\s)([\w@./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|dart|py|rb|go|rs|java|kt|swift|md|json|yaml|yml|toml|css|scss|html|sh|sql))(?:\s|$|[,:;.])/g;
 
+/** Domain keyword mappings for risk detection */
 const DOMAIN_KEYWORDS: Array<[RiskDomain, RegExp]> = [
 	["auth", /\b(auth|login|logout|oauth|cognito|session|token|permission|user role)\b/i],
 	["security", /\b(secret|credential|encrypt|decrypt|xss|csrf|injection|permission|policy|iam|firewall)\b/i],
@@ -10,12 +12,22 @@ const DOMAIN_KEYWORDS: Array<[RiskDomain, RegExp]> = [
 	["architecture", /\b(architecture|refactor|redesign|rewrite|framework|pattern|boundary|abstraction)\b/i],
 ];
 
+/** Keywords indicating coding/edit tasks */
 const CODING_KEYWORDS = /\b(add|implement|fix|change|update|refactor|rename|remove|test|write|edit|create|scaffold|wire|integrate|debug)\b/i;
+
+/** Patterns indicating question-only (non-coding) intent */
 const QUESTION_ONLY = /^(what|why|how|should|can you explain|tell me|thoughts\??)/i;
+
+/** Ambiguous patterns suggesting need for clarification */
 const AMBIGUOUS = /\b(maybe|somehow|figure out|whatever|something|make it better|clean up everything|fix it|doesn't work)\b/i;
+
+/** Patterns suggesting multi-file/planning scope */
 const PLAN_WORDS = /\b(feature|flow|architecture|multi-file|refactor|redesign|review loop|auto flow|broad|large)\b/i;
+
+/** Patterns indicating simple mechanical edits */
 const MECHANICAL_EDIT = /\b(rename|typo|copy|text|comment|format|lint|one-line|small edit|mechanical)\b/i;
 
+/** Analyze task text and return structured signals for routing decisions */
 export function analyzeTask(task: string): TaskSignal {
 	const mentionedFiles = Array.from(task.matchAll(FILE_PATTERN), (match) => match[1]).filter(Boolean);
 	const uniqueFiles = Array.from(new Set(mentionedFiles));
@@ -41,138 +53,252 @@ export function analyzeTask(task: string): TaskSignal {
 	};
 }
 
-export function routeTask(task: string, config: ConductorConfig, forcedTier?: ConductorTier): RouteDecision {
-	const signals = analyzeTask(task);
-	const reasons: string[] = [];
-	const risks: string[] = [];
+/** Generate missing context questions based on task signals */
+function missingContextQuestions(signals: TaskSignal): string[] {
+	const questions: string[] = [];
+	if (signals.isAmbiguous) questions.push("What exact outcome should the worker produce?");
+	if (signals.tasksLooksLikeCoding && signals.mentionedFiles.length === 0) questions.push("Which files, components, or area of the repo should be in scope?");
+	if (signals.riskDomains.length > 0) questions.push("Are there product, API, data, security, deployment, or compatibility constraints the worker must preserve?");
+	if (signals.estimatedFiles > 3 || signals.requiresPlan) questions.push("What validation evidence is required before this can be considered done?");
+	return questions;
+}
 
-	if (signals.isQuestionOnly || !signals.tasksLooksLikeCoding) {
-		reasons.push("Task looks conversational or planning-only; keep it in cockpit chat.");
-		return { route: "cockpit-only", requiresApproval: false, reasons, risks, signals };
-	}
+/** Suggest task refinement for improved delegation */
+function suggestedRefinement(task: string, signals: TaskSignal): string | undefined {
+	if (!signals.isAmbiguous && signals.mentionedFiles.length > 0) return undefined;
+	const scope = signals.mentionedFiles.length > 0 ? `in ${signals.mentionedFiles.join(", ")}` : "in <specific files or repo area>";
+	return `Please ${task.trim()} ${scope}; preserve existing behavior outside this scope; run <validation command>; stop if product/design decisions are needed.`;
+}
 
-	for (const domain of signals.riskDomains) {
-		risks.push(`Risk domain detected: ${domain}`);
-	}
-	if (signals.isAmbiguous) risks.push("Task is ambiguous and may need parent clarification.");
+/** Compute confidence score for a routing decision */
+function confidenceFor(route: ConductorRoute, signals: TaskSignal, forced: boolean): number {
+	let confidence = route === "instant" ? 0.9 : route === "fast" ? 0.8 : route === "careful" ? 0.72 : route === "cockpit-only" ? 0.75 : 0.45;
+	if (forced) confidence = Math.min(confidence, 0.65);
+	if (signals.isAmbiguous) confidence -= 0.25;
+	if (signals.mentionedFiles.length === 0 && signals.tasksLooksLikeCoding) confidence -= 0.1;
+	if (signals.riskDomains.length > 0) confidence -= 0.05;
+	return Math.max(0.1, Math.min(0.95, Number(confidence.toFixed(2))));
+}
 
-	const chooseAgent = (tier: ConductorTier) => {
-		if (tier === "instant") return config.agents.instant[0];
-		if (tier === "rapid") return config.agents.rapid[0];
-		return config.agents.verified;
-	};
-	const chooseModel = (tier: ConductorTier) => {
-		if (tier === "instant") return config.models.instant || undefined;
-		if (tier === "rapid") return config.models.rapid || undefined;
-		return config.models.verified || undefined;
-	};
-
-	if (forcedTier) {
-		reasons.push(`Execution profile forced by user: ${forcedTier}.`);
-		return {
-			route: forcedTier,
-			tier: forcedTier,
-			suggestedAgent: chooseAgent(forcedTier),
-			suggestedModel: chooseModel(forcedTier),
-			requiresApproval: true,
-			reasons,
-			risks,
-			signals,
-		};
-	}
-
-	const disallowedInstantDomain = signals.riskDomains.find((domain) => config.routing.instant.disallowDomains.includes(domain));
-	const fitsInstant =
-		!signals.isAmbiguous &&
-		!disallowedInstantDomain &&
-		signals.estimatedFiles <= config.routing.instant.maxFiles &&
-		signals.estimatedLines <= config.routing.instant.maxEstimatedLines;
-
-	if (fitsInstant) {
-		reasons.push("Task is exact, unambiguous, and fits the instant profile thresholds.");
-		return {
-			route: "instant",
-			tier: "instant",
-			suggestedAgent: chooseAgent("instant"),
-			suggestedModel: chooseModel("instant"),
-			requiresApproval: true,
-			reasons,
-			risks,
-			signals,
-		};
-	}
-
-	const disallowedRapidDomain = signals.riskDomains.find((domain) => config.routing.rapid.disallowDomains.includes(domain));
-	const fitsRapid =
-		!signals.isAmbiguous &&
-		!disallowedRapidDomain &&
-		signals.estimatedFiles <= config.routing.rapid.maxFiles &&
-		signals.estimatedLines <= config.routing.rapid.maxEstimatedLines;
-
-	if (fitsRapid) {
-		reasons.push("Task is narrow, low-risk, and fits the rapid profile thresholds.");
-		return {
-			route: "rapid",
-			tier: "rapid",
-			suggestedAgent: chooseAgent("rapid"),
-			suggestedModel: chooseModel("rapid"),
-			requiresApproval: true,
-			reasons,
-			risks,
-			signals,
-		};
-	}
-
-	const fitsVerified =
-		!signals.isAmbiguous &&
-		signals.estimatedFiles <= config.routing.verified.maxFiles &&
-		signals.estimatedLines <= config.routing.verified.maxEstimatedLines &&
-		!signals.riskDomains.includes("security") &&
-		!signals.riskDomains.includes("deployment");
-
-	if (fitsVerified) {
-		reasons.push("Task is bounded but too large or risky for a linear profile.");
-		if (config.routing.verified.requirePlan) reasons.push("Verified profile recommends a parent-owned plan before launch.");
-		return {
-			route: "verified",
-			tier: "verified",
-			suggestedAgent: chooseAgent("verified"),
-			suggestedModel: chooseModel("verified"),
-			requiresApproval: true,
-			reasons,
-			risks,
-			signals,
-		};
-	}
-
-	if (signals.isAmbiguous) {
-		reasons.push("Task needs clarification before delegation.");
-		return { route: "need-decision", requiresApproval: false, reasons, risks, signals };
-	}
-
-	reasons.push("Task is broad, high-risk, or likely needs the fully orchestrated verified profile.");
+/** Build base decision properties common to all routes */
+function decisionBase(route: ConductorRoute, signals: TaskSignal, forced = false): Omit<RouteDecision, "route" | "requiresApproval" | "suggestedAgent" | "suggestedModel"> {
 	return {
-		route: "verified",
-		tier: "verified",
-		suggestedAgent: chooseAgent("verified"),
-		suggestedModel: chooseModel("verified"),
-		requiresApproval: true,
-		reasons,
-		risks,
+		confidence: confidenceFor(route, signals, forced),
+		missingContextQuestions: missingContextQuestions(signals),
+		suggestedRefinement: suggestedRefinement(signals.text, signals),
+		reasons: [],
+		risks: [],
 		signals,
 	};
 }
 
+/** Get the suggested agent for a tier */
+function agentForTier(config: ConductorConfig, tier: ConductorTier): string {
+	if (tier === "instant") return config.agents.instant[0];
+	if (tier === "fast") return config.agents.fast[0];
+	return config.agents.careful;
+}
+
+/** Get the suggested model for a tier */
+function modelForTier(config: ConductorConfig, tier: ConductorTier): string | undefined {
+	if (tier === "instant") return config.models.instant || undefined;
+	if (tier === "fast") return config.models.fast || undefined;
+	return config.models.careful || undefined;
+}
+
+/** Check if task fits the instant profile */
+function fitsInstant(signals: TaskSignal, config: ConductorConfig): boolean {
+	const disallowedDomain = signals.riskDomains.find((domain) => config.routing.instant.disallowDomains.includes(domain));
+	return (
+		!signals.isAmbiguous &&
+		!disallowedDomain &&
+		signals.estimatedFiles <= config.routing.instant.maxFiles &&
+		signals.estimatedLines <= config.routing.instant.maxEstimatedLines
+	);
+}
+
+/** Check if task fits the fast profile */
+function fitsFast(signals: TaskSignal, config: ConductorConfig): boolean {
+	const disallowedDomain = signals.riskDomains.find((domain) => config.routing.fast.disallowDomains.includes(domain));
+	return (
+		!signals.isAmbiguous &&
+		!disallowedDomain &&
+		signals.estimatedFiles <= config.routing.fast.maxFiles &&
+		signals.estimatedLines <= config.routing.fast.maxEstimatedLines
+	);
+}
+
+/** Check if task fits the careful profile */
+function fitsCareful(signals: TaskSignal, config: ConductorConfig): boolean {
+	return (
+		!signals.isAmbiguous &&
+		signals.estimatedFiles <= config.routing.careful.maxFiles &&
+		signals.estimatedLines <= config.routing.careful.maxEstimatedLines &&
+		!signals.riskDomains.includes("security") &&
+		!signals.riskDomains.includes("deployment")
+	);
+}
+
+/** Build a complete decision object with agent/model selections */
+function makeDecision({
+	route,
+	tier,
+	config,
+	signals,
+	forced = false,
+	additionalReasons = [],
+	additionalRisks = [],
+}: {
+	route: ConductorRoute;
+	tier?: ConductorTier;
+	config: ConductorConfig;
+	signals: TaskSignal;
+	forced?: boolean;
+	additionalReasons?: string[];
+	additionalRisks?: string[];
+}): RouteDecision {
+	const base = decisionBase(route, signals, forced);
+	return {
+		route,
+		tier,
+		suggestedAgent: tier ? agentForTier(config, tier) : undefined,
+		suggestedModel: tier ? modelForTier(config, tier) : undefined,
+		requiresApproval: route === "cockpit-only" || route === "need-decision" ? false : true,
+		...base,
+		reasons: [...additionalReasons, ...base.reasons],
+		risks: [...additionalRisks, ...base.risks],
+	};
+}
+
+/**
+ * Route a task to the appropriate execution profile.
+ *
+ * Policy order (evaluated in sequence):
+ * 1. cockpit-only: question-only or non-coding tasks stay in cockpit
+ * 2. collect risks: gather all detected risk domains
+ * 3. forced tier: user-specified tier takes precedence
+ * 4. instant: fits thresholds, not ambiguous, no disallowed domains
+ * 5. fast: fits thresholds, not ambiguous, no disallowed domains
+ * 6. careful: fits thresholds, excludes security/deployment risks
+ * 7. need-decision: ambiguous tasks require clarification
+ * 8. default careful: broad/high-risk defaults to careful profile
+ */
+export function routeTask(task: string, config: ConductorConfig, forcedTier?: ConductorTier): RouteDecision {
+	const signals = analyzeTask(task);
+
+	// Stage 1: cockpit-only for question-only or non-coding tasks
+	const reasonsCockpit = ["Task looks conversational or planning-only; keep it in cockpit chat."];
+	if (!signals.tasksLooksLikeCoding || signals.isQuestionOnly) {
+		return makeDecision({
+			route: "cockpit-only",
+			config,
+			signals,
+			additionalReasons: reasonsCockpit,
+		});
+	}
+
+	// Stage 2: Collect risk domains (after cockpit-only check)
+	const additionalRisks: string[] = [];
+	for (const domain of signals.riskDomains) {
+		additionalRisks.push(`Risk domain detected: ${domain}`);
+	}
+	if (signals.isAmbiguous) additionalRisks.push("Task is ambiguous and may need parent clarification.");
+
+	// Stage 3: Forced tier (user-specified)
+	if (forcedTier) {
+		const forcedTierReason = [`Execution profile forced by user: ${forcedTier}.`];
+		return makeDecision({
+			route: forcedTier,
+			tier: forcedTier,
+			config,
+			signals,
+			forced: true,
+			additionalReasons: forcedTierReason,
+			additionalRisks: additionalRisks,
+		});
+	}
+
+	// Stage 4: Instant profile check
+	const instantReason = ["Task is exact, unambiguous, and fits the instant profile thresholds."];
+	if (fitsInstant(signals, config)) {
+		return makeDecision({
+			route: "instant",
+			tier: "instant",
+			config,
+			signals,
+			additionalReasons: instantReason,
+			additionalRisks: additionalRisks,
+		});
+	}
+
+	// Stage 5: Fast profile check
+	const fastReason = ["Task is narrow, low-risk, and fits the fast profile thresholds."];
+	if (fitsFast(signals, config)) {
+		return makeDecision({
+			route: "fast",
+			tier: "fast",
+			config,
+			signals,
+			additionalReasons: fastReason,
+			additionalRisks: additionalRisks,
+		});
+	}
+
+	// Stage 6: Careful profile check
+	const carefulReasonBase = ["Task is bounded but too large or risky for a linear profile."];
+	if (fitsCareful(signals, config)) {
+		const carefulReasons = [...carefulReasonBase];
+		if (config.routing.careful.requirePlan) {
+			carefulReasons.push("Careful profile recommends a parent-owned plan before launch.");
+		}
+		return makeDecision({
+			route: "careful",
+			tier: "careful",
+			config,
+			signals,
+			additionalReasons: carefulReasons,
+			additionalRisks: additionalRisks,
+		});
+	}
+
+	// Stage 7: Need-decision for ambiguous tasks
+	const needDecisionReason = ["Task needs clarification before delegation."];
+	if (signals.isAmbiguous) {
+		return makeDecision({
+			route: "need-decision",
+			config,
+			signals,
+			additionalReasons: needDecisionReason,
+			additionalRisks: additionalRisks,
+		});
+	}
+
+	// Stage 8: Default to careful for broad/high-risk tasks
+	const defaultCarefulReason = ["Task is broad, high-risk, or likely needs the fully orchestrated careful profile."];
+	return makeDecision({
+		route: "careful",
+		tier: "careful",
+		config,
+		signals,
+		additionalReasons: defaultCarefulReason,
+		additionalRisks: additionalRisks,
+	});
+}
+
+/** Format a route decision for display to the user */
 export function formatDecision(decision: RouteDecision): string {
 	const lines = [
 		`Route/profile: ${decision.route}`,
 		decision.suggestedAgent ? `Suggested agent: ${decision.suggestedAgent}` : undefined,
 		decision.suggestedModel ? `Preferred model: ${decision.suggestedModel}` : undefined,
+		`Route confidence: ${Math.round(decision.confidence * 100)}%`,
 		`Requires approval: ${decision.requiresApproval ? "yes" : "no"}`,
 		`Estimated scope: ${decision.signals.estimatedFiles} file(s), ~${decision.signals.estimatedLines} line(s)`,
 		decision.signals.mentionedFiles.length > 0 ? `Mentioned files: ${decision.signals.mentionedFiles.join(", ")}` : undefined,
 		decision.reasons.length > 0 ? `Reasons:\n${decision.reasons.map((reason) => `- ${reason}`).join("\n")}` : undefined,
 		decision.risks.length > 0 ? `Risks:\n${decision.risks.map((risk) => `- ${risk}`).join("\n")}` : undefined,
+		decision.missingContextQuestions.length > 0 ? `Missing context questions:\n${decision.missingContextQuestions.map((question) => `- ${question}`).join("\n")}` : undefined,
+		decision.suggestedRefinement ? `Suggested refinement: ${decision.suggestedRefinement}` : undefined,
 	];
 	return lines.filter(Boolean).join("\n");
 }

@@ -1,4 +1,4 @@
-export type ConductorTier = "instant" | "rapid" | "verified";
+export type ConductorTier = "instant" | "fast" | "careful";
 
 export type ExecutionTopology = "linear" | "orchestrated";
 export type ExecutionGuard = "none" | "optional" | "recommended" | "required";
@@ -13,23 +13,19 @@ export type ExecutionProfile = {
 
 export type ConductorRoute = ConductorTier | "cockpit-only" | "need-decision";
 
-export type ConductorMode = "route" | "handoff" | "delegate";
-
 export type RiskDomain = "auth" | "security" | "persistence" | "deployment" | "architecture" | "unknown";
 
 export type ConductorConfig = {
 	strictMode: boolean;
-	defaultDryRun: boolean;
 	agents: {
 		instant: string[];
-		rapid: string[];
-		verified: string;
-		reviewer: string;
+		fast: string[];
+		careful: string;
 	};
 	models: {
 		instant: string;
-		rapid: string;
-		verified: string;
+		fast: string;
+		careful: string;
 	};
 	profiles: Record<ConductorTier, ExecutionProfile>;
 	routing: {
@@ -38,12 +34,12 @@ export type ConductorConfig = {
 			maxEstimatedLines: number;
 			disallowDomains: RiskDomain[];
 		};
-		rapid: {
+		fast: {
 			maxFiles: number;
 			maxEstimatedLines: number;
 			disallowDomains: RiskDomain[];
 		};
-		verified: {
+		careful: {
 			maxFiles: number;
 			maxEstimatedLines: number;
 			requirePlan: boolean;
@@ -51,8 +47,6 @@ export type ConductorConfig = {
 
 	};
 	safety: {
-		oneWriterAtATime: boolean;
-		requireCleanOrAcknowledgedWorktree: boolean;
 		forbiddenCommands: string[];
 	};
 };
@@ -76,6 +70,9 @@ export type RouteDecision = {
 	suggestedModel?: string;
 	tier?: ConductorTier;
 	requiresApproval: boolean;
+	confidence: number;
+	missingContextQuestions: string[];
+	suggestedRefinement?: string;
 	reasons: string[];
 	risks: string[];
 	signals: TaskSignal;
