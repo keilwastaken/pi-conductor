@@ -54,7 +54,7 @@ export const instantDelegate: DelegateFlow<ConductorConfig> = {
 	name: "instant",
 	async run(input: DelegateRunInput, config: ConductorConfig, context: DelegateRunContext): Promise<DelegateRunResult> {
 		const flow = config.delegateFlows.instant;
-		const allowedFiles = uniqueStrings([input.file]);
+		const allowedFiles = uniqueStrings(input.file ? [input.file] : []);
 		const result = baseResult(input, config, allowedFiles);
 		const blockedReason = validateInstant(input, config, allowedFiles);
 		if (blockedReason) return { ...result, exitCode: 1, blockedReason };

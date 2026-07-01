@@ -5,7 +5,7 @@ import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_CONFIG = {
 	strictMode: false,
-	agents: ["instant"],
+	agents: ["instant", "fast"],
 	delegateFlows: {
 		instant: {
 			agent: "instant",
@@ -17,6 +17,17 @@ const DEFAULT_CONFIG = {
 			maxEstimatedLines: 30,
 			maxTurns: 2,
 			timeoutMs: 60000,
+		},
+		fast: {
+			agent: "fast",
+			description: "Small semantic edits with local discovery in a child context.",
+			model: "",
+			tools: ["ls", "find", "grep", "read", "write", "edit"],
+			thinking: "low",
+			maxFiles: 3,
+			maxEstimatedLines: 300,
+			maxTurns: 5,
+			timeoutMs: 180000,
 		},
 	},
 	maxFiles: 1,
@@ -44,7 +55,9 @@ const mergeConfig = (raw: unknown, base: ConductorConfig): ConductorConfig => {
 
 	const rawFlows = isRecord(raw.delegateFlows) ? raw.delegateFlows : {};
 	const rawInstant = isRecord(rawFlows.instant) ? rawFlows.instant : {};
+	const rawFast = isRecord(rawFlows.fast) ? rawFlows.fast : {};
 	const baseInstant = base.delegateFlows.instant;
+	const baseFast = base.delegateFlows.fast;
 	const instant = {
 		...baseInstant,
 		...rawInstant,
@@ -58,13 +71,26 @@ const mergeConfig = (raw: unknown, base: ConductorConfig): ConductorConfig => {
 		maxTurns: numberValue(rawInstant.maxTurns, baseInstant.maxTurns),
 		timeoutMs: numberValue(rawInstant.timeoutMs, baseInstant.timeoutMs),
 	};
+	const fast = {
+		...baseFast,
+		...rawFast,
+		agent: stringValue(rawFast.agent, baseFast.agent),
+		description: stringValue(rawFast.description, baseFast.description),
+		model: instant.model,
+		tools: stringArray(rawFast.tools, baseFast.tools),
+		thinking: "low",
+		maxFiles: numberValue(rawFast.maxFiles, baseFast.maxFiles),
+		maxEstimatedLines: numberValue(rawFast.maxEstimatedLines, baseFast.maxEstimatedLines),
+		maxTurns: numberValue(rawFast.maxTurns, baseFast.maxTurns),
+		timeoutMs: numberValue(rawFast.timeoutMs, baseFast.timeoutMs),
+	};
 
 	return {
 		...base,
 		...(raw as Partial<ConductorConfig>),
 		strictMode: typeof raw.strictMode === "boolean" ? raw.strictMode : base.strictMode,
-		agents: stringArray(raw.agents, [instant.agent]),
-		delegateFlows: { instant },
+		agents: stringArray(raw.agents, [instant.agent, fast.agent]),
+		delegateFlows: { instant, fast },
 		maxFiles: numberValue(raw.maxFiles, instant.maxFiles),
 		maxEstimatedLines: numberValue(raw.maxEstimatedLines, instant.maxEstimatedLines),
 		disallowDomains: stringArray(raw.disallowDomains, base.disallowDomains),

@@ -7,11 +7,12 @@ import { formatDecision, routeTask } from "./routing.js";
 import { shouldBlockToolCall } from "./safety.js";
 
 const HELP_TEXT = [
-	"Conductor instant commands:",
+	"Conductor commands:",
 	"- /conductor status",
 	"- /conductor setup",
 	"- /conductor route <task>",
 	"- /conductor instant <simple plan mentioning one file>",
+	"- /conductor fast <small semantic task>",
 	"- /conductor strict on|off",
 ].join("\n");
 const instantResultText = (result: { blockedReason?: string; finalOutput: string; stderr: string }): string =>
@@ -20,7 +21,7 @@ const instantResultText = (result: { blockedReason?: string; finalOutput: string
 const modelId = (model: { provider: string; id: string }) => `${model.provider}/${model.id}`;
 const fileFromPlan = (plan: string, config: ConductorConfig): string => routeTask(plan, config, true).signals.mentionedFiles[0] ?? "";
 
-async function chooseInstantModel(ctx: { modelRegistry: { getAvailable(): Array<{ provider: string; id: string; name?: string }> }; ui: { select(title: string, options: string[]): Promise<string | undefined>; notify(message: string, level?: "info" | "warning" | "error" | "success"): void } }, config: ConductorConfig) {
+async function chooseDelegateModel(ctx: { modelRegistry: { getAvailable(): Array<{ provider: string; id: string; name?: string }> }; ui: { select(title: string, options: string[]): Promise<string | undefined>; notify(message: string, level?: "info" | "warning" | "error" | "success"): void } }, config: ConductorConfig) {
 	const models = ctx.modelRegistry.getAvailable();
 	if (models.length === 0) {
 		ctx.ui.notify("No configured Pi models found. Use /login or configure models first, then run /conductor setup.", "warning");
@@ -29,7 +30,7 @@ async function chooseInstantModel(ctx: { modelRegistry: { getAvailable(): Array<
 
 	const inherit = "Inherit current Pi default";
 	const choices = [inherit, ...models.map((model) => `${modelId(model)}${model.name ? ` — ${model.name}` : ""}`)];
-	const selected = await ctx.ui.select("Choose the model for instant delegates", choices);
+	const selected = await ctx.ui.select("Choose the delegate model (fast defaults to instant)", choices);
 	if (!selected) return undefined;
 
 	const model = selected === inherit ? "" : selected.split(" — ")[0];
@@ -38,6 +39,7 @@ async function chooseInstantModel(ctx: { modelRegistry: { getAvailable(): Array<
 		delegateFlows: {
 			...config.delegateFlows,
 			instant: { ...config.delegateFlows.instant, model, thinking: "off" },
+			fast: { ...config.delegateFlows.fast, model, thinking: "low" },
 		},
 	};
 }
@@ -46,7 +48,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		const { config } = await loadConfig(ctx.cwd, ctx.isProjectTrusted());
 		const flow = config.delegateFlows.instant;
-		ctx.ui.setStatus("conductor", `instant: ${flow.model || "default"} [${flow.tools.join(",")}] ${config.strictMode ? "strict" : ""}`.trim());
+		ctx.ui.setStatus("conductor", `instant/fast: ${flow.model || "default"} ${config.strictMode ? "strict" : ""}`.trim());
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
@@ -68,28 +70,28 @@ export default function conductorExtension(pi: ExtensionAPI) {
 			const body = rest.join(" ").trim();
 			const { config, paths } = await loadConfig(ctx.cwd, ctx.isProjectTrusted());
 			const flow = config.delegateFlows.instant;
+			const fastFlow = config.delegateFlows.fast;
 
 			switch (subcommand) {
 				case "status":
 				case "config":
 					ctx.ui.notify([
-						"Conductor is instant-only.",
+						"Conductor flows: instant, fast.",
 						`Strict mode: ${config.strictMode ? "on" : "off"}`,
-						`Instant model: ${flow.model || "inherit current Pi default"}`,
-						`Instant thinking: ${flow.thinking}`,
-						`Instant flow tools: ${flow.tools.join(", ")}`,
-						`Instant limit: ${flow.maxFiles} file, ~${flow.maxEstimatedLines} lines`,
+						`Delegate model: ${flow.model || "inherit current Pi default"}`,
+						`Instant: thinking ${flow.thinking}; tools ${flow.tools.join(", ")}; limit ${flow.maxFiles} file, ~${flow.maxEstimatedLines} lines`,
+						`Fast: thinking ${fastFlow.thinking}; tools ${fastFlow.tools.join(", ")}; limit ${fastFlow.maxFiles} files, ~${fastFlow.maxEstimatedLines} lines`,
 						`Config paths: ${paths.length > 0 ? paths.join(", ") : "defaults only"}`,
 					].join("\n"), "info");
 					return;
 
 				case "setup": {
-					const updated = await chooseInstantModel(ctx, config);
+					const updated = await chooseDelegateModel(ctx, config);
 					if (!updated) return;
 					const path = await saveGlobalConfig(updated);
 					const instant = updated.delegateFlows.instant;
-					ctx.ui.setStatus("conductor", `instant: ${instant.model || "default"} [${instant.tools.join(",")}] ${updated.strictMode ? "strict" : ""}`.trim());
-					ctx.ui.notify(`Instant model ${instant.model || "will inherit the current Pi default"}; thinking is forced off. Saved ${path}`, "info");
+					ctx.ui.setStatus("conductor", `instant/fast: ${instant.model || "default"} ${updated.strictMode ? "strict" : ""}`.trim());
+					ctx.ui.notify(`Delegate model ${instant.model || "will inherit the current Pi default"}; fast uses the same model, instant thinking is off, fast thinking is low. Saved ${path}`, "info");
 					return;
 				}
 
@@ -116,6 +118,20 @@ export default function conductorExtension(pi: ExtensionAPI) {
 					return;
 				}
 
+				case "fast": {
+					if (!body) {
+						ctx.ui.notify("Usage: /conductor fast <small semantic task>", "warning");
+						return;
+					}
+					const result = await delegates.fast.run({ plan: body }, config, {
+						cwd: ctx.cwd,
+						projectTrusted: ctx.isProjectTrusted(),
+						signal: ctx.signal,
+					});
+					ctx.ui.notify(instantResultText(result), result.exitCode === 0 && !result.blockedReason ? "info" : "warning");
+					return;
+				}
+
 				case "strict": {
 					const desired = body.toLowerCase();
 					if (desired !== "on" && desired !== "off") {
@@ -123,7 +139,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
 						return;
 					}
 					const path = await saveGlobalConfig({ ...config, strictMode: desired === "on" });
-					ctx.ui.setStatus("conductor", `instant: ${flow.model || "default"} [${flow.tools.join(",")}] strict ${desired}`);
+					ctx.ui.setStatus("conductor", `instant/fast: ${flow.model || "default"} strict ${desired}`);
 					ctx.ui.notify(`Conductor strict mode ${desired}; saved ${path}`, "info");
 					return;
 				}
@@ -153,6 +169,38 @@ export default function conductorExtension(pi: ExtensionAPI) {
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const { config } = await loadConfig(ctx.cwd, ctx.isProjectTrusted());
 			const result = await delegates.instant.run({ plan: params.plan, file: params.file, line: params.line }, config, {
+				cwd: ctx.cwd,
+				projectTrusted: ctx.isProjectTrusted(),
+				signal,
+				onUpdate,
+			});
+
+			return {
+				content: [{ type: "text", text: instantResultText(result) }],
+				details: result,
+				isError: result.exitCode !== 0 || Boolean(result.blockedReason),
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "conductor_fast",
+		label: "Fast Conductor Delegate",
+		description: "Run the fast delegate flow for a small semantic task with local discovery and low thinking.",
+		promptSnippet: "Run a fast delegate flow",
+		promptGuidelines: [
+			"Use conductor_fast for small semantic tasks where the delegate should discover local context itself, such as building a codemap.",
+			"Keep the cockpit prompt compact; do not pre-scan the project in the main chat.",
+			"Do not use conductor_fast for risky security, persistence, deployment, or broad refactor decisions.",
+		],
+		parameters: Type.Object({
+			flow: Type.Optional(Type.Literal("fast", { description: "Only fast is supported" })),
+			plan: Type.String({ description: "Small semantic task for the fast delegate" }),
+			outputFile: Type.Optional(Type.String({ description: "Primary output file; defaults to CODEMAP.md" })),
+		}),
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			const { config } = await loadConfig(ctx.cwd, ctx.isProjectTrusted());
+			const result = await delegates.fast.run({ plan: params.plan, outputFile: params.outputFile }, config, {
 				cwd: ctx.cwd,
 				projectTrusted: ctx.isProjectTrusted(),
 				signal,

@@ -1,9 +1,10 @@
-export type DelegateFlowName = "instant";
+export type DelegateFlowName = "instant" | "fast";
 
 export type DelegateRunInput = {
 	plan: string;
-	file: string;
+	file?: string;
 	line?: number;
+	outputFile?: string;
 };
 
 export type DelegateRunResult = {
@@ -11,6 +12,7 @@ export type DelegateRunResult = {
 	plan: string;
 	allowedFiles: string[];
 	line?: number;
+	outputFile?: string;
 	tools: string[];
 	exitCode: number;
 	finalOutput: string;

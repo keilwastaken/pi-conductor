@@ -12,14 +12,14 @@ const DOMAIN_KEYWORDS: Array<[string, RegExp]> = [
 	["architecture", /\b(architecture|refactor|redesign|rewrite|framework|pattern|abstraction)\b/i],
 ];
 
-const CODING_KEYWORDS = /\b(add|implement|fix|change|update|rename|remove|test|write|edit|create|debug)\b/i;
+const CODING_KEYWORDS = /\b(add|implement|fix|change|update|rename|remove|test|write|edit|create|debug|build|generate|document|map)\b/i;
 const QUESTION_ONLY = /^(what|why|how|should\b|tell me\b|can you explain\b)/i;
 const AMBIGUOUS = /\b(maybe|somehow|figure out|whatever|something|make it better|clean up everything|fix it|doesn't work)\b/i;
 const MECHANICAL_EDIT = /\b(rename|typo|copy|text|comment|format|one-line|small edit|mechanical)\b/i;
 
 const hasRepoScope = (text: string): boolean => REPO_SCOPE_PATTERN.test(text);
 
-type ConductorRoute = "instant" | "cockpit-only" | "need-decision";
+type ConductorRoute = "instant" | "fast" | "cockpit-only" | "need-decision";
 
 function analyzeTask(task: string) {
 	const mentionedFiles = Array.from(task.matchAll(FILE_PATTERN), (match) => match[1]).filter(Boolean);
@@ -55,7 +55,7 @@ function missingContextQuestions(signals: TaskSignal): string[] {
 }
 
 function confidenceFor(route: ConductorRoute, signals: TaskSignal, forced: boolean): number {
-	let confidence = route === "instant" ? 0.9 : route === "cockpit-only" ? 0.75 : 0.45;
+	let confidence = route === "instant" ? 0.9 : route === "fast" ? 0.8 : route === "cockpit-only" ? 0.75 : 0.45;
 	if (forced) confidence = Math.min(confidence, 0.65);
 	if (signals.isAmbiguous) confidence -= 0.25;
 	if (signals.mentionedFiles.length === 0 && signals.tasksLooksLikeCoding) confidence -= 0.1;
@@ -74,13 +74,19 @@ function fitsInstant(signals: TaskSignal, config: ConductorConfig): boolean {
 	return !signals.isAmbiguous && !disallowedDomain && signals.estimatedFiles <= flow.maxFiles && signals.estimatedLines <= flow.maxEstimatedLines;
 }
 
+function fitsFast(signals: TaskSignal, config: ConductorConfig): boolean {
+	const flow = config.delegateFlows.fast;
+	const disallowedDomain = signals.riskDomains.find((domain) => domain !== "architecture" && config.disallowDomains.includes(domain));
+	return !signals.isAmbiguous && !disallowedDomain && signals.estimatedFiles <= flow.maxFiles && signals.estimatedLines <= flow.maxEstimatedLines;
+}
+
 function makeDecision(route: ConductorRoute, config: ConductorConfig, signals: TaskSignal, forced = false, reasons: string[] = [], risks: string[] = []) {
-	const tier = route === "instant" ? "instant" : undefined;
+	const tier = route === "instant" || route === "fast" ? route : undefined;
 	return {
 		route,
 		tier,
-		suggestedAgent: tier ? config.delegateFlows.instant.agent : undefined,
-		requiresApproval: route === "instant",
+		suggestedAgent: tier ? config.delegateFlows[tier].agent : undefined,
+		requiresApproval: route === "instant" || route === "fast",
 		confidence: confidenceFor(route, signals, forced),
 		missingContextQuestions: missingContextQuestions(signals),
 		suggestedRefinement: suggestedRefinement(signals.text, signals),
@@ -107,7 +113,11 @@ export function routeTask(task: string, config: ConductorConfig, forcedInstant =
 		return makeDecision("instant", config, signals, false, ["Task is exact, unambiguous, and fits instant thresholds."], risks);
 	}
 
-	return makeDecision("need-decision", config, signals, false, ["Only instant delegation is configured; clarify or handle this in the main chat."], risks);
+	if (fitsFast(signals, config)) {
+		return makeDecision("fast", config, signals, false, ["Task is small, semantic, and fits fast delegate thresholds."], risks);
+	}
+
+	return makeDecision("need-decision", config, signals, false, ["Clarify, use a more careful flow later, or handle this in the main chat."], risks);
 }
 
 export function formatDecision(decision: ReturnType<typeof routeTask>): string {
